@@ -1,0 +1,19 @@
+{
+    "netid": 0,
+    "ip": "",
+    "port": 9981,
+    "WebAddr": "",
+    "WebPort": 2082,
+    "WebStatic": "",
+    "WebViews": "",
+    "RpcServer": false,
+    "RpcUser": "",
+    "RpcPassword": "",
+    "RpcPort": 0,
+    "appname": "web",
+    "httpport": "2080",
+    "runmode": "dev",
+   
+    "sessionon": "true",
+    "RpcAllowip": "" 
+}

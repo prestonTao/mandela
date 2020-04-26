@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+
+<head lang="en">
+  <meta charset="UTF-8">
+  <title>深网钱包</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="renderer" content="webkit">
+  <meta http-equiv="Cache-Control" content="no-siteapp" />
+  <link rel="alternate icon" type="image/png" href="assets/i/favicon.png">
+  <link rel="stylesheet" href="assets/css/amazeui.min.css" />
+  <script src="assets/js/jquery.min.js"></script>
+  <script src="assets/js/amazeui.min.js"></script>
+  <script src="assets/js/thisapp.js"></script>
+  <script src="assets/js/md5.js"></script>
+  <script src="assets/js/model/register.js"></script>
+  <script src="assets/js/model/register.js"></script>
+  <script src="assets/js/model/popmodel.js"></script>
+</head>
+
+<body>
+  <div class="am-cf admin-main">
+    <div class="admin-content">
+      <div class="admin-content-body">
+        <div class="am-cf am-padding am-padding-bottom-0">
+          <div class=" am-cf"><strong class="am-text-primary ">修改头像</strong>  </div>
+        </div>
+ 
+          <div class="am-u-sm-12 am-u-md-8"> 
+              <form method="POST" id="iconForm" action="/api/user/uploadIcon" enctype="multipart/form-data">
+                <input type="file" name="icon" id="icon"  />
+                <div id="imgdiv" style="display:none;">
+                </div>
+                <button type="submit"  name="uploadIconBT"  >确定
+                </button>
+              </form>
+          </div>
+        </div>
+      </div> 
+    </div> 
+    <br> 
+
+      <hr style="widows:80%" />
+    
+    <footer  style="text-align:center">
+      <small  >© 2018 深网智合.</small>
+       
+    </footer>
+</body>
+
+</html>

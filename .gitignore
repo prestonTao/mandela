@@ -1,0 +1,33 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.db
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+go.sum
+
+/example/*
+
+
+test/wallet/
+test/wallet1/
+test/wallet2/
+test/wallet3/
+test/data/
+test/db/
+test/conf/
+test/logs/
+test/map_chain_tools/oldwallet/
+test/map_chain_tools/logs
+test/map_chain_tools/conf
+web/static/face/
+web/static/upload/
+*_
+*-*

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+
+<head lang="en">
+  <meta charset="UTF-8">
+  <title>深网钱包</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="renderer" content="webkit">
+  <meta http-equiv="Cache-Control" content="no-siteapp" />
+  <link rel="alternate icon" type="image/png" href="assets/i/favicon.png">
+  <link rel="stylesheet" href="assets/css/amazeui.min.css" />
+  <script src="assets/js/jquery.min.js"></script>
+  <script src="assets/js/amazeui.min.js"></script>
+  <script src="assets/js/thisapp.js"></script>
+  <script src="assets/js/md5.js"></script>
+  <script src="assets/js/model/register.js"></script> 
+  <script src="assets/js/model/popmodel.js"></script>
+</head>
+
+<body>
+  <div class="am-cf admin-main">
+    <div class="admin-content">
+      <div class="admin-content-body">
+        <div class="am-cf am-padding am-padding-bottom-0">
+          <div class=" am-cf"><strong class="am-text-primary ">注册资料</strong> / <small>Personal information</small></div>
+        </div>
+ 
+          <div class="am-u-sm-12 am-u-md-8"> 
+            <form class="am-form" method="POST">
+
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  登录名:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <input type="text" pattern="[a-z A-Z]*" id="username" placeholder="登录名，请用英文" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+                </div>
+           
+              </div>
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  密码:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <input id="password" type="password" placeholder="密码 / Password" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+                </div>
+              </div>
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  重复密码:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  " id="repasswordWrap">
+                  <input id="repassword" type="password" onchange="checkPasswords()" placeholder="再输一遍密码" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+
+                </div>
+              </div>
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  性别:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  " id="sexGroup">
+                  <label><input name="sex" type="radio" checked value="男" />男 </label>
+                  <label><input name="sex" type="radio" value="女" />女 </label>
+
+                </div>
+              </div>
+
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  邮件:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <input type="text" id="email" placeholder="你的电子邮件 / Email" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+                </div>
+              </div>
+
+
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  电话:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <input type="text" id="tel" placeholder="电话 / Telephone" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+                </div>
+              </div>
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  姓:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <input type="text" id="firstname" placeholder="姓 / first name" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+                </div>
+              </div>
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  名:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <input type="text" id="lastname" placeholder="名 / last name" required class="am-input-sm am-u-sm-9 am-u-md-8 ">
+                </div>
+              </div>
+
+              <div class="am-g am-margin-top">
+                <div class="am-u-sm-3 am-u-md-2  am-text-right">
+                  简介:
+                </div>
+                <div class="am-u-sm-9 am-u-md-10  ">
+                  <textarea class="" rows="5" id="intro" placeholder="输入个人简介" class="am-input-sm am-u-sm-9 am-u-md-8 "></textarea>
+                  <small>250字以内写出你的梦想.</small>
+                </div>
+              </div>
+
+              <!-- <div class="am-form-group"> -->
+              <div class="am-u-sm-10 am-u-sm-push-1"> 
+                <button type="submit" onclick="submitform('./index.html');" name="login" class="am-btn am-btn-primary am-btn-sm am-fl">登
+                  录
+                </button>
+
+                <button type="reset" class="am-btn am-btn-primary am-btn-sm am-fr">重置</button>
+              </div>
+              <!-- </div> -->
+            </form>
+          </div>
+        </div>
+      </div> 
+    </div> 
+    <br> 
+
+      <hr style="widows:80%" />
+    
+    <footer  style="text-align:center">
+      <small  >© 2018 深网智合.</small>
+       
+    </footer>
+</body>
+
+</html>
