@@ -9,7 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/mattn/go-sqlite3"
+	// _ "github.com/mattn/go-sqlite3"
+	_ "github.com/logoove/sqlite"
 )
 
 const (

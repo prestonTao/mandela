@@ -13,7 +13,7 @@ import (
 //Start Start
 func Start() {
 
-	beego.BConfig.WebConfig.Session.SessionOn = true
+	beego.BConfig.WebConfig.Session.SessionOn = false
 	beego.BConfig.Listen.HTTPPort = int(config.WebPort)
 	//	搴旂敤鐩戝惉鍦板潃锛岄粯璁や负绌猴紝鐩戝惉鎵€鏈夌殑缃戝崱 IP銆
 	beego.BConfig.Listen.HTTPSAddr = config.WebAddr
@@ -24,6 +24,7 @@ func Start() {
 	beego.BConfig.CopyRequestBody = true
 	beego.BConfig.WebConfig.TemplateLeft = "<%"
 	beego.BConfig.WebConfig.TemplateRight = "%>"
+	// beego.PprofOn = true
 
 	//home
 	//	beego.SetStaticPath("/static", `D:\workspaces\go\src\mandela\web\static`)

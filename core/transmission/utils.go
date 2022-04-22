@@ -52,7 +52,7 @@ func randn() []byte {
 	// rand.Seed(timens)
 	// r := rand.Uint64() //Intn(65535)
 	bs := make([]byte, 8)
-	binary.BigEndian.PutUint64(bs, uint64(r))
+	binary.LittleEndian.PutUint64(bs, uint64(r))
 	return bs
 }
 
@@ -71,6 +71,6 @@ func getRandNum(n int64) int64 {
 func bytesToUint64(b []byte) uint64 {
 	bytesBuffer := bytes.NewBuffer(b)
 	var tmp uint64
-	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
+	binary.Read(bytesBuffer, binary.LittleEndian, &tmp)
 	return tmp
 }

@@ -6,23 +6,26 @@ import (
 
 type sessionBase struct {
 	name      string
-	attrbutes map[string]interface{}
+	attrbutes *sync.Map // map[string]interface{}
 	//	cache      []byte
 	//	cacheindex uint32
 	//	tempcache  []byte
-	lock *sync.RWMutex
+	// lock *sync.RWMutex
 }
 
 func (this *sessionBase) Set(name string, value interface{}) {
-	this.lock.Lock()
-	this.attrbutes[name] = value
-	this.lock.Unlock()
+	this.attrbutes.Store(name, value)
+	// this.lock.Lock()
+	// this.attrbutes[name] = value
+	// this.lock.Unlock()
 }
 func (this *sessionBase) Get(name string) interface{} {
-	this.lock.RLock()
-	itr := this.attrbutes[name]
-	this.lock.RUnlock()
-	return itr
+	v, _ := this.attrbutes.Load(name)
+	return v
+	// this.lock.RLock()
+	// itr := this.attrbutes[name]
+	// this.lock.RUnlock()
+	// return itr
 }
 func (this *sessionBase) GetName() string {
 	return this.name
@@ -37,9 +40,10 @@ func (this *sessionBase) SetName(name string) {
 //	return
 //}
 func (this *sessionBase) Close() {}
-func (this *sessionBase) GetRemoteHost() string {
-	return "127.0.0.1:0"
-}
+
+// func (this *sessionBase) GetRemoteHost() string {
+// 	return "127.0.0.1:0"
+// }
 
 type Session interface {
 	Send(msgID uint64, data, datapuls *[]byte, waite bool) error
@@ -66,6 +70,10 @@ func (this *sessionStore) addSession(name string, session Session) {
 	//	this.lock.Lock()
 	//	this.nameStore[session.GetName()] = session
 	//	this.lock.Unlock()
+
+	// netaddr := AddressNet([]byte(name))
+
+	// Log.Info("add sessionid %s", netaddr.B58String())
 	this.nameStore.Store(name, session)
 }
 
@@ -73,7 +81,15 @@ func (this *sessionStore) getSession(name string) (Session, bool) {
 	//	this.lock.RLock()
 	//	s, ok := this.nameStore[name]
 	//	this.lock.RUnlock()
+	// this.nameStore.Range(func(k, v interface{}) bool {
+	// nameOne := k.(string)
+	// netaddr := AddressNet([]byte(nameOne))
+	// Log.Info("get sessionid one: %s", netaddr.B58String())
+	// return true
+	// })
 
+	// netaddr := AddressNet([]byte(name))
+	// Log.Info("get sessionid %s", netaddr.B58String())
 	value, ok := this.nameStore.Load(name)
 	if !ok {
 		return nil, false
@@ -82,7 +98,23 @@ func (this *sessionStore) getSession(name string) (Session, bool) {
 	return ss, true
 }
 
+func (this *sessionStore) getSessionByHost(host string) Session {
+	var session Session
+	this.nameStore.Range(func(k, v interface{}) bool {
+		one := v.(Session)
+		// Log.Info("getSessionByHost %s %s", host, one.GetRemoteHost())
+		if host == one.GetRemoteHost() {
+			session = one
+			return false
+		}
+		return true
+	})
+	return session
+}
+
 func (this *sessionStore) removeSession(name string) {
+	netaddr := AddressNet([]byte(name))
+	Log.Info("del sessionid %s", netaddr.B58String())
 	this.nameStore.Delete(name)
 }
 
@@ -91,6 +123,7 @@ func (this *sessionStore) renameSession(oldName, newName string) {
 	if !ok {
 		return
 	}
+	// Log.Info("update sessionid %s %s", oldName, newName)
 	this.nameStore.Store(newName, value)
 	this.nameStore.Delete(oldName)
 }
@@ -146,10 +179,11 @@ func (this *sessionStore) getClientConn(engine *Engine) *Client {
 	//	}
 
 	sessionBase := sessionBase{
+		attrbutes: new(sync.Map),
 		//		cache:      make([]byte, 1024, 16*1024*1024),
 		//		cacheindex: 0,
 		//		tempcache:  make([]byte, 1024, 1024),
-		lock: new(sync.RWMutex),
+		// lock: new(sync.RWMutex),
 	}
 	clientConn := &Client{
 		sessionBase: sessionBase,
@@ -181,12 +215,13 @@ func (this *sessionStore) getServerConn(engine *Engine) *ServerConn {
 	//	}
 	//创建一个新的session
 	sessionBase := sessionBase{
+		attrbutes: new(sync.Map),
 		//		name:       "",
 		//		cache:      make([]byte, 16*1024*1024, 16*1024*1024),
 		//		cacheindex: 0,
 		//		tempcache:  make([]byte, 1024, 1024),
-		lock:      new(sync.RWMutex),
-		attrbutes: make(map[string]interface{}),
+		// lock:      new(sync.RWMutex),
+		// attrbutes: make(map[string]interface{}),
 	}
 
 	serverConn := &ServerConn{

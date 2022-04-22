@@ -6,7 +6,6 @@ import (
 	"mandela/core/message_center/flood"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
-	"encoding/hex"
 )
 
 func GetNodeMachineID(recvid *nodeStore.AddressNet) int64 {
@@ -15,7 +14,8 @@ func GetNodeMachineID(recvid *nodeStore.AddressNet) int64 {
 		return 0
 	}
 
-	bs := flood.WaitRequest(config.CLASS_get_MachineID, hex.EncodeToString(message.Body.Hash), 0)
+	// bs := flood.WaitRequest(config.CLASS_get_MachineID, hex.EncodeToString(message.Body.Hash), 0)
+	bs, _ := flood.WaitRequest(config.CLASS_get_MachineID, utils.Bytes2string(message.Body.Hash), 0)
 	if bs == nil {
 		return 0
 	}

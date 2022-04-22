@@ -1,0 +1,25 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+import "txbase.proto";
+
+message TxNameIn {
+	TxBase            TxBase               =1;
+	bytes             Account              =2;    //账户名称
+    repeated bytes    NetIds               =3;    //网络地址列表
+    bytes             NetIdsMerkleHash     =4;    //网络地址默克尔树hash
+    repeated bytes    AddrCoins            =5;    //网络地址列表
+    bytes             AddrCoinsMerkleHash  =6;    //网络地址默克尔树hash
+}
+
+message TxNameOut {
+	TxBase TxBase = 1;
+}

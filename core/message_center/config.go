@@ -19,6 +19,7 @@ const (
 	CLASS_getBlockHead        = "CLASS_getBlockHead"        //获取区块头
 	CLASS_getTransaction      = "CLASS_getTransaction"      //获取交易
 	CLASS_getUnconfirmedBlock = "CLASS_getUnconfirmedBlock" //获取未确认区块
+	CLASS_getBlockLastCurrent = "CLASS_getBlockLastCurrent" //获取已确认高度最高区块
 
 	CLASS_getWalletAddr = "CLASS_getWalletAddr" //获取节点钱包地址
 

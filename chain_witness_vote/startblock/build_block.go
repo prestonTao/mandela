@@ -32,7 +32,7 @@ func BuildFirstBlock() (*mining.BlockHeadVO, error) {
 
 	// fmt.Println("开始创建创世区块")
 
-	db.InitDB(config.DB_path)
+	db.InitDB(config.DB_path, config.DB_path_temp)
 
 	//----------------生成第一个区块-----------------
 
@@ -56,30 +56,33 @@ func BuildFirstBlock() (*mining.BlockHeadVO, error) {
 		NTx:         uint64(len(txHashes)),            //交易数量
 		Tx:          txHashes,                         //本区块包含的交易id
 		Time:        utils.GetNow(),                   //  time.Now().Unix(),                //unix时间戳
-		Witness:     keystore.GetCoinbase(),           //
+		Witness:     keystore.GetCoinbase().Addr,      //
 	}
 	blockHead1.BuildMerkleRoot()
-	blockHead1.BuildSign(keystore.GetCoinbase())
-	blockHead1.BuildHash()
+	blockHead1.BuildSign(keystore.GetCoinbase().Addr)
+	blockHead1.BuildBlockHash()
 
 	// blockHead1.FindNonce(1, make(chan bool, 1))
-	bhbs, _ := blockHead1.Json()
-	err := db.Save(blockHead1.Hash, bhbs)
+	bhbs, _ := blockHead1.Proto()
+	// bhbs, _ := blockHead1.Json()
+	err := db.LevelDB.Save(blockHead1.Hash, bhbs)
 	if err != nil {
 		return nil, err
 	}
 	// fmt.Println("key", "blockHead", hex.EncodeToString(blockHead1.Hash))
 	// fmt.Println("value", "blockHead", string(*bhbs), "\n")
 
-	db.Save(config.Key_block_start, &blockHead1.Hash)
+	db.LevelDB.Save(config.Key_block_start, &blockHead1.Hash)
 
 	hashExist := false
 
 	//保存到数据库
 	for _, one := range txs {
-		one.SetBlockHash(blockHead1.Hash)
+		// one.SetBlockHash(blockHead1.Hash)
+		db.SaveTxToBlockHash(one.GetHash(), &blockHead1.Hash)
 		// one.TxBase.BlockHash = blockHead1.Hash
-		bs, err := one.Json()
+		bs, err := one.Proto()
+		// bs, err := one.Json()
 		if err != nil {
 			// fmt.Println("2 json格式化错误", err)
 			return nil, err
@@ -89,7 +92,7 @@ func BuildFirstBlock() (*mining.BlockHeadVO, error) {
 			hashExist = true
 		}
 
-		err = db.Save(*one.GetHash(), bs)
+		err = db.LevelDB.Save(*one.GetHash(), bs)
 		if err != nil {
 			return nil, err
 		}
@@ -99,12 +102,14 @@ func BuildFirstBlock() (*mining.BlockHeadVO, error) {
 	}
 
 	//保存见证人押金交易
-	depositIn.SetBlockHash(blockHead1.Hash)
-	bs, err := depositIn.Json()
+	db.SaveTxToBlockHash(depositIn.GetHash(), &blockHead1.Hash)
+	// depositIn.SetBlockHash(blockHead1.Hash)
+	bs, err := depositIn.Proto()
+	// bs, err := depositIn.Json()
 	if err != nil {
 		return nil, err
 	}
-	err = db.Save(*depositIn.GetHash(), bs)
+	err = db.LevelDB.Save(*depositIn.GetHash(), bs)
 	if err != nil {
 		return nil, err
 	}
@@ -132,24 +137,20 @@ func BuildFirstBlock() (*mining.BlockHeadVO, error) {
 func BuildReward(balanceTotal uint64) mining.TxItr {
 	//创世块矿工奖励
 	baseCoinAddr := keystore.GetCoinbase()
-	puk, ok := keystore.GetPukByAddr(baseCoinAddr)
-	if !ok {
-		return nil
-	}
 
 	//构建输入
 
-	vins := make([]mining.Vin, 0)
+	vins := make([]*mining.Vin, 0)
 	vin := mining.Vin{
-		Puk:  puk, //公钥
-		Sign: nil, //对上一个交易签名，是对整个交易签名（若只对输出签名，当地址和金额一样时，签名输出相同）。
+		Puk:  baseCoinAddr.Puk, //公钥
+		Sign: nil,              //对上一个交易签名，是对整个交易签名（若只对输出签名，当地址和金额一样时，签名输出相同）。
 	}
-	vins = append(vins, vin)
+	vins = append(vins, &vin)
 
-	vouts := make([]mining.Vout, 0)
-	vouts = append(vouts, mining.Vout{
-		Value:   balanceTotal,           //输出金额 = 实际金额 * 100000000
-		Address: keystore.GetCoinbase(), //钱包地址
+	vouts := make([]*mining.Vout, 0)
+	vouts = append(vouts, &mining.Vout{
+		Value:   balanceTotal,                //输出金额 = 实际金额 * 100000000
+		Address: keystore.GetCoinbase().Addr, //钱包地址
 	})
 	base := mining.TxBase{
 		Type:       config.Wallet_tx_type_mining, //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
@@ -168,13 +169,13 @@ func BuildReward(balanceTotal uint64) mining.TxItr {
 	for i, one := range reward.Vin {
 		for _, key := range keystore.GetAddrAll() {
 
-			puk, ok := keystore.GetPukByAddr(key)
+			puk, ok := keystore.GetPukByAddr(key.Addr)
 			if !ok {
 				return nil
 			}
 
 			if bytes.Equal(puk, one.Puk) {
-				_, prk, _, err := keystore.GetKeyByAddr(key, config.Wallet_keystore_default_pwd)
+				_, prk, _, err := keystore.GetKeyByAddr(key.Addr, config.Wallet_keystore_default_pwd)
 				// prk, err := key.GetPriKey(pwd)
 				if err != nil {
 					return nil
@@ -192,12 +193,12 @@ func BuildReward(balanceTotal uint64) mining.TxItr {
 func BuildDepositIn() mining.TxItr {
 	coinbase := keystore.GetCoinbase()
 
-	puk, _ := keystore.GetPukByAddr(coinbase)
+	// puk, _ := keystore.GetPukByAddr(coinbase)
 
 	//首个见证人押金
 	// mining.CreateTxDepositIn()
 	txin := mining.Tx_deposit_in{
-		Puk: puk,
+		Puk: coinbase.Puk,
 	}
 	//创世块矿工奖励
 	// vins := make([]mining.Vin, 0)
@@ -207,10 +208,10 @@ func BuildDepositIn() mining.TxItr {
 	// 	Puk:  coinbasepuk, //公钥
 	// 	// Sign :, //对上一个交易签名，是对整个交易签名（若只对输出签名，当地址和金额一样时，签名输出相同）。
 	// })
-	vouts := make([]mining.Vout, 0)
-	vouts = append(vouts, mining.Vout{
+	vouts := make([]*mining.Vout, 0)
+	vouts = append(vouts, &mining.Vout{
 		Value:   config.Mining_deposit, //  config.Wallet_MDL_mining, //输出金额 = 实际金额 * 100000000
-		Address: coinbase,              //钱包地址
+		Address: coinbase.Addr,         //钱包地址
 	})
 	depositInBase := mining.TxBase{
 		Type: config.Wallet_tx_type_deposit_in, //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易

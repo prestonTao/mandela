@@ -9,7 +9,6 @@ import (
 	mc "mandela/core/message_center"
 	"mandela/core/message_center/flood"
 	"mandela/core/utils"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -202,7 +201,8 @@ func DownloadFilechunkToLocal(fileinfo *FileIndex, dps ...*DownProc) error {
 				// mbody := mc.NewMessageBody(&content, "", nil, 0)
 				// message := mc.NewMessage(mhead, mbody)
 				// if message.Send(MSGID_downloadFileChunk) {
-				bs := flood.WaitRequest(mc.CLASS_downloadfile, hex.EncodeToString(message.Body.Hash), 0)
+				// bs := flood.WaitRequest(mc.CLASS_downloadfile, hex.EncodeToString(message.Body.Hash), 0)
+				bs, _ := flood.WaitRequest(mc.CLASS_downloadfile, utils.Bytes2string(message.Body.Hash), 0)
 				if bs == nil {
 					// fmt.Println("返回的下载结果没数据，可能超时")
 					break

@@ -14,7 +14,8 @@ func RaftVote(c engine.Controller, msg engine.Packet) {
 		// fmt.Println(err)
 		return
 	}
-	form, _ := utils.FromB58String(msg.Session.GetName())
+	// form, _ := utils.FromB58String(msg.Session.GetName())
+	form := utils.Bytes2string(msg.Session.GetName())
 	if message.IsSendOther(&form) {
 		return
 	}
@@ -55,7 +56,8 @@ func RaftVote_recv(c engine.Controller, msg engine.Packet) {
 		// fmt.Println("error  1", err)
 		return
 	}
-	form, _ := utils.FromB58String(msg.Session.GetName())
+	// form, _ := utils.FromB58String(msg.Session.GetName())
+	form := utils.Bytes2string(msg.Session.GetName())
 	if message.IsSendOther(&form) {
 		return
 	}
@@ -65,7 +67,7 @@ func RaftVote_recv(c engine.Controller, msg engine.Packet) {
 		engine.NLog.Error(engine.LOG_file, "%s", string(msg.Dataplus))
 		return
 	}
-	mc.ResponseWait(mc.CLASS_raftvote, message.Body.Hash.B58String(), message.Body.Content)
+	mc.ResponseWait(mc.CLASS_raftvote, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }
 
 func RaftVoteHeart(c engine.Controller, msg engine.Packet) {
@@ -74,7 +76,8 @@ func RaftVoteHeart(c engine.Controller, msg engine.Packet) {
 		// fmt.Println(err)
 		return
 	}
-	form, _ := utils.FromB58String(msg.Session.GetName())
+	// form, _ := utils.FromB58String(msg.Session.GetName())
+	form := utils.Bytes2string(msg.Session.GetName())
 	if message.IsSendOther(&form) {
 		return
 	}

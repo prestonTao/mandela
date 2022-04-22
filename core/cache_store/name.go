@@ -5,11 +5,14 @@ import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"bytes"
-	"encoding/json"
 	"math/rand"
 	"sync"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var (
 	tempNameLock     = new(sync.RWMutex)

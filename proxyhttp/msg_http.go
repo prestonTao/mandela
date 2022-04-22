@@ -7,15 +7,18 @@ import (
 	mc "mandela/core/message_center"
 	"mandela/core/message_center/flood"
 	"mandela/core/nodeStore"
+	"mandela/core/utils"
 	"bytes"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func Register() {
 	mc.Register_p2p(gconfig.MSGID_http_request, AgentHttpRequest)
@@ -60,7 +63,9 @@ func SendHttpRequest(id *nodeStore.TempId, request HttpRequest) *[]byte {
 	fmt.Println("请求信息", id, request.Method, request.Url, request.Port)
 	message, ok, _ := mc.SendP2pMsg(gconfig.MSGID_http_request, id.PeerId, request.JSON())
 	if ok {
-		return flood.WaitRequest(mc.MSG_WAIT_http_request, hex.EncodeToString(message.Body.Hash), 0)
+		// return flood.WaitRequest(mc.MSG_WAIT_http_request, hex.EncodeToString(message.Body.Hash), 0)
+		bs, _ := flood.WaitRequest(mc.MSG_WAIT_http_request, utils.Bytes2string(message.Body.Hash), 0)
+		return bs
 	}
 	return nil
 
@@ -152,7 +157,8 @@ func AgentHttpRequest(c engine.Controller, msg engine.Packet, message *mc.Messag
 func AgentHttpRespones(c engine.Controller, msg engine.Packet, message *mc.Message) {
 	//	fmt.Println("保存一个公钥对应的域名")
 
-	flood.ResponseWait(mc.MSG_WAIT_http_request, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(mc.MSG_WAIT_http_request, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(mc.MSG_WAIT_http_request, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 
 }
 

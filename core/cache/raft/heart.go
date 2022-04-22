@@ -43,18 +43,19 @@ func RandInt64(min, max int) string {
 
 //更新心跳时间
 func UpdateHeartTime(teamid *utils.Multihash) error {
-	HeartTime[teamid.B58String()] = time.Now()
+	HeartTime[utils.Bytes2string(teamid)] = time.Now()
 	return nil
 }
 
 //检查心跳时间
 func checkHeartTime() {
 	for k, v := range HeartTime {
-		teamid, err := utils.FromB58String(k)
-		if err != nil {
-			// fmt.Println(err)
-			break
-		}
+		// teamid, err := utils.FromB58String(k)
+		// if err != nil {
+		// 	// fmt.Println(err)
+		// 	break
+		// }
+		teamid := utils.Multihash([]byte(k))
 		team := CreateTeam(&teamid)
 		//如果已经是leader,则不需检查心跳
 		if team.Role.Role == Leader {

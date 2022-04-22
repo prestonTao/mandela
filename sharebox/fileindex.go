@@ -4,12 +4,15 @@ import (
 	"mandela/core/nodeStore"
 	sconfig "mandela/sharebox/config"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	文件索引

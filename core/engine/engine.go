@@ -95,11 +95,14 @@ func (this *Engine) newConnect(conn net.Conn) {
 	serverConn.conn = conn
 	serverConn.Ip = conn.RemoteAddr().String()
 	serverConn.Connected_time = time.Now().String()
+	serverConn.outChan = make(chan *[]byte, 10000)
+	serverConn.outChanCloseLock = new(sync.Mutex)
+	serverConn.outChanIsClose = false
 	serverConn.run()
 	this.sessionStore.addSession(remoteName, serverConn)
 
 	// fmt.Println(time.Now().String(), "建立连接", conn.RemoteAddr().String())
-	// Log.Debug("%s 建立连接：%s", time.Now().String(), conn.RemoteAddr().String())
+	Log.Debug("Accept remote addr:%s", conn.RemoteAddr().String())
 
 }
 
@@ -109,6 +112,7 @@ func (this *Engine) newConnect(conn net.Conn) {
 	@return  name  对方的名称
 */
 func (this *Engine) AddClientConn(ip string, port uint32, powerful bool) (ss Session, err error) {
+	// Log.Info("1111 %v", this.sessionStore)
 
 	clientConn := this.sessionStore.getClientConn(this)
 	clientConn.name = this.name
@@ -130,6 +134,11 @@ func (this *Engine) AddInterceptor(itpr Interceptor) {
 //获得session
 func (this *Engine) GetSession(name string) (Session, bool) {
 	return this.sessionStore.getSession(name)
+}
+
+//通过ip地址和端口获得session,可以用于是否有重复连接
+func (this *Engine) GetSessionByHost(host string) Session {
+	return this.sessionStore.getSessionByHost(host)
 }
 
 func (this *Engine) GetAllSession() []Session {
@@ -166,7 +175,7 @@ func NewEngine(name string) *Engine {
 	暂停服务器
 */
 func (this *Engine) Suspend(names ...string) {
-	Log.Debug("暂停服务器")
+	// Log.Debug("暂停服务器")
 	// this.lis.Close()
 	this.isSuspend = true
 	for _, one := range this.sessionStore.getAllSessionName() {

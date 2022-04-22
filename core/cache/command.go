@@ -24,7 +24,7 @@ func sendMsg(id *utils.Multihash, data []byte) error {
 	mbody := mc.NewMessageBody(&data, "", nil, 0)
 	message := mc.NewMessage(mhead, mbody)
 	if message.Send(MSGID_syncData) {
-		bs := mc.WaitRequest(mc.CLASS_syncdata, message.Body.Hash.B58String())
+		bs := mc.WaitRequest(mc.CLASS_syncdata, utils.Bytes2string(message.Body.Hash))
 		if bs == nil {
 			// fmt.Println("发送共享文件消息失败，可能超时")
 			return errors.New("发送共享文件消息失败，可能超时")

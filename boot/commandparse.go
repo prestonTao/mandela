@@ -6,11 +6,14 @@ import (
 	"mandela/core/engine"
 	"mandela/rpc"
 	"bytes"
-	"encoding/json"
 	"flag"
 	"io/ioutil"
 	"os"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var (
 	Init        = flag.String("init", "", "创建创始区块(默认：genesis.json)")
@@ -30,15 +33,15 @@ var (
 	RpcPassword = flag.String("rpcpassword", "", "JSON-RPC 连接使用的密码")
 	WalletPwd   = flag.String("walletpwd", config.Wallet_keystore_default_pwd, "钱包密码")
 	classpath   = flag.String("classpath", "", "jar包路径")
+	Load        = flag.String("load", "", "从历史区块拉起链端")
 )
 
-func init() {
+func Step() {
 	parseConfig()
 	flag.Parse()
 	parseParam()
 	parseNonFlag()
 }
-
 func parseNonFlag() {
 	for _, param := range flag.Args() {
 		switch param {

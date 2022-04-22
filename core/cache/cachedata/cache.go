@@ -1,9 +1,9 @@
 package cachedata
 
 import (
+	"mandela/core/utils"
 	"sync"
 	"time"
-	"mandela/core/utils"
 )
 
 //存储结构
@@ -29,7 +29,7 @@ func (c *Cache) Save(d *CacheData) {
 //根据KEY获取原始数据DATA
 func (c *Cache) Get(key []byte) []byte {
 	khash := buildHash(key)
-	k := khash.B58String()
+	k := utils.Bytes2string(khash) // khash.B58String()
 	data, ok := c.Data.Load(k)
 	if ok {
 		b := data.([]byte)
@@ -45,13 +45,13 @@ func (c *Cache) Get(key []byte) []byte {
 //根据KEY删除数据
 func (c *Cache) Del(key []byte) {
 	khash := buildHash(key)
-	k := khash.B58String()
+	k := utils.Bytes2string(khash) // khash.B58String()
 	c.Data.Delete(k)
 }
 
 //根据hash id 获取原始数据DATA
 func (c *Cache) GetByHash(id *utils.Multihash) []byte {
-	k := id.B58String()
+	k := utils.Bytes2string(id) //id.B58String()
 	data, ok := c.Data.Load(k)
 	if ok {
 		b := data.([]byte)
@@ -67,7 +67,7 @@ func (c *Cache) GetByHash(id *utils.Multihash) []byte {
 //根据原始key获取cachedata
 func (c *Cache) GetCacheData(key []byte) *CacheData {
 	khash := buildHash(key)
-	k := khash.B58String()
+	k := utils.Bytes2string(khash) //khash.B58String()
 	data, ok := c.Data.Load(k)
 	if ok {
 		b := data.([]byte)
@@ -82,7 +82,7 @@ func (c *Cache) GetCacheData(key []byte) *CacheData {
 
 //根据hash id 获取cachedata
 func (c *Cache) GetCacheDataByHash(id *utils.Multihash) *CacheData {
-	k := id.B58String()
+	k := utils.Bytes2string(id) //id.B58String()
 	data, ok := c.Data.Load(k)
 	if ok {
 		b := data.([]byte)

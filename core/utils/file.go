@@ -2,12 +2,15 @@ package utils
 
 import (
 	"mandela/core/engine"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	检查目录是否存在，不存在则创建

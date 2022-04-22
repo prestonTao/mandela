@@ -2,9 +2,16 @@ package wallet
 
 import (
 	"mandela/chain_witness_vote"
+	"mandela/chain_witness_vote/mining"
+	"mandela/config"
+	"mandela/rpc"
+	"mandela/rpc/model"
 
 	"github.com/astaxie/beego"
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Index struct {
 	beego.Controller
@@ -19,6 +26,132 @@ func (this *Index) Index() {
 	this.Data["CheckKey"] = chain_witness_vote.CheckKey()
 
 	this.TplName = "wallet/index.tpl"
+}
+
+func (this *Index) Getinfo() {
+	info := model.Getinfo{
+		Netid:          nil,                                       //
+		TotalAmount:    config.Mining_coin_total,                  //
+		Balance:        0,                                         //
+		BalanceFrozen:  0,                                         //
+		BalanceLockup:  0,                                         //
+		Testnet:        false,                                     //
+		Blocks:         mining.GetLongChain().GetCurrentBlock(),   //
+		Group:          0,                                         //
+		StartingBlock:  mining.GetLongChain().GetStartingBlock(),  //区块开始高度
+		StartBlockTime: mining.GetLongChain().GetStartBlockTime(), //
+		HighestBlock:   mining.GetHighestBlock(),                  //所链接的节点的最高高度
+		CurrentBlock:   mining.GetLongChain().GetCurrentBlock(),   //已经同步到的区块高度
+		PulledStates:   mining.GetLongChain().GetPulledStates(),   //正在同步的区块高度
+		BlockTime:      config.Mining_block_time,                  //出块时间
+		LightNode:      config.Mining_light_min,                   //轻节点押金数量
+		CommunityNode:  config.Mining_vote,                        //社区节点押金数量
+		WitnessNode:    config.Mining_deposit,                     //见证人押金数量
+		NameDepositMin: config.Mining_name_deposit_min,            //
+		AddrPre:        config.AddrPre,                            //
+		TokenBalance:   nil,                                       //
+	}
+	this.Data["json"] = info
+	this.ServeJSON()
+	return
+}
+
+func (this *Index) Block() {
+
+	// engine.Log.Info("requstBody %s", string(this.Ctx.Input.RequestBody))
+
+	out := make(map[string]interface{})
+	paramsMap := make(map[string]interface{})
+
+	err := json.Unmarshal(this.Ctx.Input.RequestBody, &paramsMap)
+	if err != nil {
+		out["Msg"] = "not find param"
+		out["Code"] = 1
+		this.Data["json"] = out
+		this.ServeJSON()
+		return
+	}
+	value, ok := paramsMap["height"]
+	if !ok {
+		out["Msg"] = "not find height param"
+		out["Code"] = 1
+		this.Data["json"] = out
+		this.ServeJSON()
+		return
+	}
+
+	height, ok := value.(float64)
+	if !ok {
+		out["Msg"] = "height param fail"
+		out["Code"] = 1
+		this.Data["json"] = out
+		this.ServeJSON()
+		return
+	}
+
+	bhvo := mining.BlockHeadVO{
+		Txs: make([]mining.TxItr, 0), //交易明细
+	}
+	// engine.Log.Info("查询索引 %s", config.BlockHeight+strconv.Itoa(int(height)))
+	bh := mining.LoadBlockHeadByHeight(uint64(height))
+	// bh := mining.FindBlockHead(uint64(height))
+	if bh == nil {
+		out["Code"] = 1
+		out["Msg"] = "not find blockhead"
+		this.Data["json"] = out
+		this.ServeJSON()
+		return
+	}
+	bhvo.BH = bh
+
+	for _, one := range bh.Tx {
+		txItr, e := mining.LoadTxBase(one)
+		// txItr, e := mining.FindTxBase(one)
+		if e != nil {
+			out["Msg"] = "not find tx"
+			out["Code"] = 1
+			this.Data["json"] = out
+			this.ServeJSON()
+			return
+		}
+		bhvo.Txs = append(bhvo.Txs, txItr)
+	}
+
+	out["Code"] = 0
+	out["Data"] = bhvo
+	this.Data["json"] = out
+	this.ServeJSON()
+	return
+}
+
+func (this *Index) GetWitnessList() {
+
+	// engine.Log.Info("requstBody %s", string(this.Ctx.Input.RequestBody))
+
+	out := make(map[string]interface{})
+
+	wbg := mining.GetWitnessListSort()
+
+	wvos := make([]rpc.WitnessVO, 0)
+	for _, one := range append(wbg.Witnesses, wbg.WitnessBackup...) {
+
+		name := mining.FindWitnessName(*one.Addr)
+
+		wvo := rpc.WitnessVO{
+			Addr:            one.Addr.B58String(), //见证人地址
+			Payload:         name,                 //
+			Score:           one.Score,            //押金
+			Vote:            one.VoteNum,          //      voteValue,            //投票票数
+			CreateBlockTime: one.CreateBlockTime,  //预计出块时间
+		}
+		wvos = append(wvos, wvo)
+	}
+
+	out["Code"] = 0
+	out["Data"] = wvos
+	this.Data["json"] = out
+	this.ServeJSON()
+	return
 }
 
 ///*

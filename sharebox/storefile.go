@@ -6,12 +6,14 @@ import (
 	"mandela/core/nodeStore"
 	sconfig "mandela/sharebox/config"
 	"bytes"
-	"encoding/json"
 	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type FileInfo struct {
 	Hash *nodeStore.AddressNet `json:"Hash"` //文件hash

@@ -2,6 +2,7 @@ package virtual_node
 
 import (
 	"mandela/core/nodeStore"
+	"mandela/core/utils"
 	"math/big"
 )
 
@@ -37,21 +38,23 @@ func FindNearVnode(nodeId, outId *AddressNetExtend, includeSelf bool) AddressNet
 	if includeSelf {
 		vnodes := GetVnodeSelf()
 		for _, v := range vnodes {
-			vnodeMap[v.Vid.B58String()] = v
+			vnodeMap[utils.Bytes2string(v.Vid)] = v
 		}
 	} else {
 		//不包括自己，逻辑节点中有可能包括自己节点，则删除自己节点
 		vnodes := GetVnodeSelf()
 		for _, v := range vnodes {
-			delete(vnodeMap, v.Vid.B58String())
+			delete(vnodeMap, utils.Bytes2string(v.Vid))
 		}
 	}
 
 	//有排除的节点，不添加
-	delete(vnodeMap, outId.B58String())
+	if outId != nil {
+		delete(vnodeMap, utils.Bytes2string(*outId))
+	}
 
 	//构建kad算法，添加逻辑节点
-	kl := nodeStore.NewKademlia()
+	kl := nodeStore.NewKademlia(len(vnodeMap))
 	for _, v := range vnodeMap {
 		kl.Add(new(big.Int).SetBytes(v.Vid))
 	}
@@ -66,32 +69,6 @@ func FindNearVnode(nodeId, outId *AddressNetExtend, includeSelf bool) AddressNet
 	}
 	mh := AddressNetExtend(targetId.Bytes())
 	return mh
-
-	// outIdStr := ""
-	// if outId != nil {
-	// 	outIdStr = outId.B58String()
-	// }
-	// Nodes.Range(func(k, v interface{}) bool {
-	// 	// if k.(string) == outIdStr {
-	// 	// 	return true
-	// 	// }
-	// 	value := v.(* Node)
-	// 	if bytes.Equal(value )
-	// 	kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
-	// 	return true
-	// })
-
-	// targetIds := kl.Get(new(big.Int).SetBytes(*nodeId))
-	// if len(targetIds) == 0 {
-	// 	return nil
-	// }
-	// targetId := targetIds[0]
-	// if targetId == nil {
-	// 	return nil
-	// }
-	// mh := AddressNet(targetId.Bytes())
-	// return &mh
-	// return nil
 }
 
 /*
@@ -99,10 +76,11 @@ func FindNearVnode(nodeId, outId *AddressNetExtend, includeSelf bool) AddressNet
 	@nodeId         要查找的节点
 */
 func FindNearVnodeInSelf(nodeId *AddressNetExtend) *AddressNetExtend {
+	vnodeinfo := GetVnodeSelf()
 
 	//构建kad算法，添加逻辑节点
-	kl := nodeStore.NewKademlia()
-	for _, v := range GetVnodeSelf() {
+	kl := nodeStore.NewKademlia(len(vnodeinfo))
+	for _, v := range vnodeinfo {
 		kl.Add(new(big.Int).SetBytes(v.Vid))
 	}
 

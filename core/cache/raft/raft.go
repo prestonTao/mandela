@@ -1,11 +1,13 @@
 package raft
 
 import (
-	"encoding/json"
-	// "fmt"
 	"mandela/core/utils"
 	"sync"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
 	Leader    = "leader"    //管理者
@@ -23,11 +25,11 @@ func NewRaftData() *RaftData {
 
 //创建team
 func (rd *RaftData) CreateTeam(teamid *utils.Multihash) *RaftTeam {
-	teami, ok := rd.Team.Load(teamid.B58String())
+	teami, ok := rd.Team.Load(utils.Bytes2string(teamid))
 	if !ok {
 		nodeids := getQuarterLogicIds(teamid)
 		teamnew := RaftTeam{TeamId: teamid, Nodeids: nodeids, Role: &RaftRole{}, Vote: make(map[string]int)}
-		rd.Team.Store(teamid.B58String(), teamnew)
+		rd.Team.Store(utils.Bytes2string(teamid), teamnew)
 		return &teamnew
 	}
 	team := teami.(RaftTeam)
@@ -36,7 +38,7 @@ func (rd *RaftData) CreateTeam(teamid *utils.Multihash) *RaftTeam {
 
 //获取team
 func (rd *RaftData) GetTeam(teamid *utils.Multihash) *RaftTeam {
-	teami, ok := rd.Team.Load(teamid.B58String())
+	teami, ok := rd.Team.Load(utils.Bytes2string(teamid))
 	if ok {
 		team := teami.(RaftTeam)
 		return &team
@@ -46,13 +48,13 @@ func (rd *RaftData) GetTeam(teamid *utils.Multihash) *RaftTeam {
 
 //获删除team
 func (rd *RaftData) DelTeam(teamid *utils.Multihash) error {
-	rd.Team.Delete(teamid.B58String())
+	rd.Team.Delete(utils.Bytes2string(teamid))
 	return nil
 }
 
 //保存team
 func (rd *RaftData) SaveTeam(team *RaftTeam) error {
-	rd.Team.Store(team.TeamId.B58String(), *team)
+	rd.Team.Store(utils.Bytes2string(team.TeamId), *team)
 	return nil
 }
 
@@ -80,7 +82,7 @@ type RaftTeam struct {
 
 //发起投票
 func (rt *RaftTeam) CreateVote(nodeid *utils.Multihash) error {
-	rt.Vote[nodeid.B58String()] = 1
+	rt.Vote[utils.Bytes2string(nodeid)] = 1
 	//广播投票信息,只有备选者才能发起投票
 	if rt.Role.Role == Candidate {
 		MulitiVote(rt)
@@ -90,7 +92,7 @@ func (rt *RaftTeam) CreateVote(nodeid *utils.Multihash) error {
 
 //投票
 func (rt *RaftTeam) DoVote(nodeid *utils.Multihash) *RaftTeam {
-	rt.Vote[nodeid.B58String()] = 1
+	rt.Vote[utils.Bytes2string(nodeid)] = 1
 	result := float32(len(rt.Vote)) / float32(len(rt.Nodeids))
 	// fmt.Println("投票结果:", len(rt.Vote), len(rt.Nodeids), result)
 	if result >= 0.5 {
@@ -101,7 +103,7 @@ func (rt *RaftTeam) DoVote(nodeid *utils.Multihash) *RaftTeam {
 		//发送心跳，通知已当选
 		MulitiHeart(rt)
 		//加入心跳定时器
-		AddHeartTask(rt.TeamId.B58String())
+		AddHeartTask(utils.Bytes2string(rt.TeamId))
 	}
 	return rt
 }

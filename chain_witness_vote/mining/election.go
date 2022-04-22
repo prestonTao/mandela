@@ -13,14 +13,9 @@ package mining
 */
 
 import (
-	"mandela/config"
-	"mandela/core/keystore"
-	mc "mandela/core/message_center"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/core/utils/crypto"
-	"bytes"
-	"encoding/json"
 )
 
 ////参与挖矿竟票计数器
@@ -120,13 +115,13 @@ type Election struct {
 	Time        int64                 `json:"time"`        //竞选时间
 }
 
-func (this *Election) JSON() *[]byte {
-	bs, err := json.Marshal(this)
-	if err != nil {
-		return nil
-	}
-	return &bs
-}
+// func (this *Election) JSON() *[]byte {
+// 	bs, err := json.Marshal(this)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	return &bs
+// }
 
 func NewElection(addr *nodeStore.AddressNet) *Election {
 	return &Election{
@@ -136,17 +131,18 @@ func NewElection(addr *nodeStore.AddressNet) *Election {
 	}
 }
 
-func ParseElection(bs *[]byte) *Election {
-	ec := new(Election)
-	decoder := json.NewDecoder(bytes.NewBuffer(*bs))
-	decoder.UseNumber()
-	err := decoder.Decode(ec)
-	// err := json.Unmarshal(*bs, ec)
-	if err != nil {
-		return nil
-	}
-	return ec
-}
+// func ParseElection(bs *[]byte) *Election {
+// 	ec := new(Election)
+// 	// var jso = jsoniter.ConfigCompatibleWithStandardLibrary
+// 	// err := json.Unmarshal(*bs, ec)
+// 	decoder := json.NewDecoder(bytes.NewBuffer(*bs))
+// 	decoder.UseNumber()
+// 	err := decoder.Decode(ec)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	return ec
+// }
 
 /*
 	选票
@@ -161,25 +157,26 @@ type BallotTicket struct {
 	//	GroupHeight uint64           `json:"groupheight"` //矿工组高度
 }
 
-func (this *BallotTicket) Json() *[]byte {
-	bs, err := json.Marshal(this)
-	if err != nil {
-		return nil
-	}
-	return &bs
-}
+// func (this *BallotTicket) Json() *[]byte {
+// 	bs, err := json.Marshal(this)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	return &bs
+// }
 
-func ParseBallotTicket(bs *[]byte) *BallotTicket {
-	ec := new(BallotTicket)
-	decoder := json.NewDecoder(bytes.NewBuffer(*bs))
-	decoder.UseNumber()
-	err := decoder.Decode(ec)
-	// err := json.Unmarshal(*bs, ec)
-	if err != nil {
-		return nil
-	}
-	return ec
-}
+// func ParseBallotTicket(bs *[]byte) *BallotTicket {
+// 	ec := new(BallotTicket)
+// 	// var jso = jsoniter.ConfigCompatibleWithStandardLibrary
+// 	// err := json.Unmarshal(*bs, ec)
+// 	decoder := json.NewDecoder(bytes.NewBuffer(*bs))
+// 	decoder.UseNumber()
+// 	err := decoder.Decode(ec)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	return ec
+// }
 
 /*
 	创建一个投票并广播出去
@@ -188,51 +185,18 @@ func ParseBallotTicket(bs *[]byte) *BallotTicket {
 	@key       *keystore.Address   投票者的key
 */
 func MulticastBallotTicket(deposit *[]byte, addr *crypto.AddressCoin) {
-	//	fmt.Println("=============给自己投票", addr.B58String(), hex.EncodeToString(*deposit))
-	key := keystore.GetCoinbase()
-	puk, ok := keystore.GetPukByAddr(key)
-	if !ok {
-		return
-	}
+	// addrInfo := keystore.GetCoinbase()
 
-	bt := BallotTicket{
-		Addr:    &key,              //投票者地址
-		Puk:     puk,               //投票者公钥
-		Sign:    []byte("先不做签名验证"), //签名
-		Witness: addr,              //见证人地址
-		Deposit: *deposit,          //见证人押金交易id
-	}
-
-	//	AddBallotTicket(&bt)
-
-	mc.SendMulticastMsg(config.MSGID_multicast_vote_recv, bt.Json())
-	// head := mc.NewMessageHead(nil, nil, false)
-	// body := mc.NewMessageBody(bt.Json(), "", nil, 0)
-	// message := mc.NewMessage(head, body)
-	// message.BuildHash()
-
-	// //继续广播给其他节点
-	// if nodeStore.NodeSelf.IsSuper {
-	// 	//广播给其他超级节点
-	// 	//		mh := utils.Multihash(*message.Body.Content)
-	// 	ids := nodeStore.GetIdsForFar(message.Head.SenderSuperId)
-	// 	for _, one := range ids {
-	// 		//			log.Println("发送给", one.B58String())
-	// 		if ss, ok := engine.GetSession(one.B58String()); ok {
-	// 			ss.Send(config.MSGID_multicast_vote_recv, head.JSON(), body.JSON(), false)
-	// 		}
-	// 	}
-
-	// 	//广播给代理对象
-	// 	pids := nodeStore.GetProxyAll()
-	// 	for _, one := range pids {
-	// 		if ss, ok := engine.GetSession(one); ok {
-	// 			//				ss.Send(MSGID_multicast_online_recv, &msg.Data, false)
-	// 			ss.Send(config.MSGID_multicast_vote_recv, head.JSON(), body.JSON(), false)
-	// 		}
-	// 	}
-
+	// bt := BallotTicket{
+	// 	Addr:    &addrInfo.Addr,    //投票者地址
+	// 	Puk:     addrInfo.Puk,      //投票者公钥
+	// 	Sign:    []byte("先不做签名验证"), //签名
+	// 	Witness: addr,              //见证人地址
+	// 	Deposit: *deposit,          //见证人押金交易id
 	// }
+
+	// mc.SendMulticastMsg(config.MSGID_multicast_vote_recv, bt.Json())
+
 }
 
 /*

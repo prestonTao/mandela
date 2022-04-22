@@ -14,11 +14,9 @@ package addr_manager
 import (
 	// "fmt"
 	gconfig "mandela/config"
-	"mandela/core/config"
 	"io/ioutil"
 	"net/http"
 	"os"
-	"time"
 )
 
 const (
@@ -27,9 +25,10 @@ const (
 
 var (
 	//官方节点地址
-	Path_SuperPeerdomain = "mandela.io:9981"
+	// Path_SuperPeerdomain = "mandela.io:9981"
 	//官方目录服务器地址
-	Path_DirectotyServerAddr = []string{"mandela.io:19981"}
+	// Path_DirectotyServerAddr = []string{"mandela.io:19981"}
+	Path_DirectotyServerAddr = []string{}
 )
 
 func init() {
@@ -37,8 +36,8 @@ func init() {
 }
 
 func InitSuperPeer() {
-	Path_SuperPeerdomain = config.Init_LocalIP + ":9981"
-	Path_DirectotyServerAddr = []string{config.Init_LocalIP + ":19981"}
+	// Path_SuperPeerdomain = config.Init_LocalIP + ":9981"
+	// Path_DirectotyServerAddr = []string{config.Init_LocalIP + ":19981"}
 	//判断文件夹是否存在
 	if _, err := os.Stat(gconfig.Path_configDir); err != nil {
 		if os.IsNotExist(err) {
@@ -52,14 +51,15 @@ func InitSuperPeer() {
 	开始加载超级节点地址
 */
 func StartLoadSuperPeer() {
-	Sys_superNodeEntry[Path_SuperPeerdomain] = ""
+	// Sys_superNodeEntry[Path_SuperPeerdomain] = ""
+	// Sys_superNodeEntry.Store(Path_SuperPeerdomain, "")
 	CheckAddr()
-	go func() {
-		//获得一个心跳
-		for range time.NewTicker(Sys_cleanAddressTicker).C {
-			CheckAddr()
-		}
-	}()
+	// go func() {
+	// 	//获得一个心跳
+	// 	for range time.NewTicker(Sys_cleanAddressTicker).C {
+	// 		CheckAddr()
+	// 	}
+	// }()
 }
 
 /*

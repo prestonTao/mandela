@@ -1,0 +1,26 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+message BlockHead {
+	 bytes              Hash              =1;  //区块头hash
+	 uint64             Height            =2;  //区块高度(每秒产生一个块高度，uint64容量也足够使用上千亿年)
+	 uint64             GroupHeight       =3;  //矿工组高度
+	 uint64             GroupHeightGrowth =4;  //组高度增长量。默认0为自动计算增长量（兼容之前的区块）,最少增量为1
+	 bytes              Previousblockhash =5;  //上一个区块头hash
+	 bytes              Nextblockhash     =6;  //下一个区块头hash,可能有多个分叉，但是要保证排在第一的链是最长链
+	 uint64             NTx               =7;  //交易数量
+	 bytes              MerkleRoot        =8;  //交易默克尔树根hash
+	 repeated bytes     Tx                =9;  //本区块包含的交易id
+	 int64              Time              =10;  //出块时间，unix时间戳
+	 bytes              Witness           =11;  //此块见证人地址
+	 bytes              Sign              =12;  //见证人出块时，见证人对块签名，以证明本块是指定见证人出块。
+}
+

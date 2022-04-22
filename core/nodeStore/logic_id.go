@@ -1,8 +1,8 @@
 package nodeStore
 
 import (
+	"mandela/core/utils"
 	"bytes"
-	"encoding/hex"
 	"math/big"
 	"sync"
 )
@@ -34,7 +34,7 @@ func (this *Ids) AddId(id []byte) (ok bool, removeIDs [][]byte) {
 
 	delId := make([][]byte, 0)
 	for i, one := range this.ids {
-		kl := NewKademlia()
+		kl := NewKademlia(2)
 		kl.Add(new(big.Int).SetBytes(one))
 		kl.Add(new(big.Int).SetBytes(id))
 		nearId := kl.Get(new(big.Int).SetBytes(*netIDs[i]))
@@ -84,7 +84,7 @@ func (this *Ids) RemoveId(id []byte) {
 		}
 		ids := this.GetIds()
 
-		kl := NewKademlia()
+		kl := NewKademlia(len(ids))
 
 		for _, one := range ids {
 			kl.Add(new(big.Int).SetBytes(one))
@@ -107,13 +107,14 @@ func (this *Ids) RemoveId(id []byte) {
 	获取所有id
 */
 func (this *Ids) GetIds() [][]byte {
-	m := make(map[string][]byte)
 	if this.count <= 0 {
 		return make([][]byte, 0)
 	}
 	//去重复
+	m := make(map[string][]byte)
 	for _, one := range this.ids {
-		m[hex.EncodeToString(one)] = one
+		// m[hex.EncodeToString(one)] = one
+		m[utils.Bytes2string(one)] = one
 	}
 	//组装成数组
 	ids := make([][]byte, 0)

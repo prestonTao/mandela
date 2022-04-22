@@ -1,0 +1,16 @@
+{
+"netid":9,
+"ip":"127.0.0.1",
+"port":59981,
+"WebAddr":"0.0.0.0",
+"WebPort":5081,
+"WebStatic":"./static",
+"WebViews":"./views",
+"RpcServer":true,
+"RpcUser":"test",
+"RpcPassword":"testp",
+"miner":true,
+"NetType":"release",
+"AddrPre":"MMS",
+"end":0
+}

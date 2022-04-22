@@ -7,10 +7,90 @@ import (
 	"mandela/core/message_center"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
+	"mandela/sqlite3_db"
 	"bytes"
 	"encoding/hex"
 	"log"
+	"runtime"
+	"sync"
+	"time"
 )
+
+const (
+	Mining_Status_Start           = 1 //开始状态，节点启动
+	Mining_Status_WaitMulticas    = 2 //
+	Mining_Status_WaitImportBlock = 3 //
+	Mining_Status_ImportBlock     = 4 //
+	// Mining_Status_WaitMulticas = 5 //
+
+)
+
+var MiningStatusLock = new(sync.Mutex)
+var MiningStatus = Mining_Status_Start
+var BhvoMulticasCache = make(map[string]*BlockHeadVO)
+
+func init() {
+
+}
+
+func SetMiningStatus_() {
+
+}
+
+func AddBlockToCache(bhvo *BlockHeadVO) {
+	//先清理缓存
+	MiningStatusLock.Lock()
+	now := time.Now()
+	for k, bhvo := range BhvoMulticasCache {
+		if bhvo.BH.Time < now.Unix()-(config.Mining_block_time*10) {
+			delete(BhvoMulticasCache, k)
+		}
+	}
+	//再添加区块
+	BhvoMulticasCache[utils.Bytes2string(bhvo.BH.Hash)] = bhvo
+	MiningStatusLock.Unlock()
+}
+
+/*
+	从缓存中找到对应区块导入
+*/
+func ImportBlockByCache(hash *[]byte) {
+	var bhvo, prebhvo *BlockHeadVO
+	// ok := false
+	MiningStatusLock.Lock()
+	bhvo, _ = BhvoMulticasCache[utils.Bytes2string(*hash)]
+	MiningStatusLock.Unlock()
+	if bhvo == nil {
+		return
+	}
+	//导入区块，先查找本区块是否也在缓存中
+
+	MiningStatusLock.Lock()
+	prebhvo, _ = BhvoMulticasCache[utils.Bytes2string(bhvo.BH.Previousblockhash)]
+	MiningStatusLock.Unlock()
+	if prebhvo != nil {
+		//先导入前置区块
+		err := forks.AddBlockHead(prebhvo)
+		if err == nil {
+			//广播区块
+			go MulticastBlock(*prebhvo)
+			// utils.Go(MulticastBlock(*prebhvo))
+			MiningStatusLock.Lock()
+			delete(BhvoMulticasCache, utils.Bytes2string(prebhvo.BH.Hash))
+			MiningStatusLock.Unlock()
+		}
+	}
+	//再导入本区块
+	err := forks.AddBlockHead(bhvo)
+	if err == nil {
+		//广播区块
+		go MulticastBlock(*bhvo)
+		// utils.Go(MulticastBlock(*bhvo))
+		MiningStatusLock.Lock()
+		delete(BhvoMulticasCache, utils.Bytes2string(bhvo.BH.Hash))
+		MiningStatusLock.Unlock()
+	}
+}
 
 // /*
 // 	开始挖矿
@@ -58,6 +138,8 @@ import (
 
 // }
 
+// var logblockheight = uint64(152020)
+
 /*
 	查找未确认的区块
 	获取其中的交易，用于验证交易
@@ -69,7 +151,8 @@ func (this *Witness) FindUnconfirmedBlock() (*Block, []Block) {
 	var preBlock *Block
 	//判断是否是该组第一个块
 	isFirst := false
-	group := this.Group.SelectionChain()
+	// engine.Log.Info("FindUnconfirmedBlock SelectionChain")
+	group := this.Group.SelectionChain(nil)
 	if group == nil {
 		isFirst = true
 	} else {
@@ -77,29 +160,32 @@ func (this *Witness) FindUnconfirmedBlock() (*Block, []Block) {
 		//取本组最后一个块
 		// fmt.Println("获取本组最后一个块", len(group.Blocks))
 		preBlock = group.Blocks[len(group.Blocks)-1]
-		// fmt.Println("1前置区块", preBlock)
+		// engine.Log.Info("1前置区块 %+v", preBlock)
 	}
-	// fmt.Println("是否是本组第一个块", isFirst)
+	// engine.Log.Info("是否是本组第一个块 %v", isFirst)
 
 	//找到上一个组
 	preGroup := this.Group
 	var preGroupBlock *Group
+	var ok bool
 	for {
-		// fmt.Println("-----------寻找上一组 1111")
-		var ok bool
+		// if preGroup.Height > logblockheight || preGroup.Height < 145137 {
+		// 	engine.Log.Info("-----------寻找上一组 1111 %d", preGroup.Height)
+		// }
+		ok = false
 		preGroup = preGroup.PreGroup
-		ok, preGroupBlock = preGroup.CheckBlockGroup()
+		ok, preGroupBlock = preGroup.CheckBlockGroup(nil)
 		if ok {
-			// fmt.Println("-----------寻找上一组 222222222")
+			// engine.Log.Info("-----------寻找上一组 222222222")
 			if isFirst {
 				//取本组最后一个块
-				// fmt.Println("获取上一组最后一个块", len(group.Blocks))
+				// engine.Log.Info("获取上一组最后一个块")
 				preBlock = preGroupBlock.Blocks[len(preGroupBlock.Blocks)-1]
-				// fmt.Println("2前置区块", preBlock)
+				// engine.Log.Info("2前置区块", preBlock)
 			}
 			break
 		}
-		// fmt.Println("-----------寻找上一组 3333333")
+		// engine.Log.Info("-----------寻找上一组 3333333")
 	}
 
 	//查找出未确认的块
@@ -118,6 +204,108 @@ func (this *Witness) FindUnconfirmedBlock() (*Block, []Block) {
 }
 
 /*
+	验证未确认的区块
+	获取其中的交易，用于验证交易
+	@return    *Block     出块时，应该链接的上一个块
+	@return    []Block    出块时，应该链接的上一个组的块
+*/
+func (this *Witness) CheckUnconfirmedBlock(blockhash *[]byte) (*Block, []Block) {
+
+	//找到上一个块
+	var preBlock *Block
+	//判断是否是该组第一个块
+	isFirst := false
+
+	// engine.Log.Info("CheckUnconfirmedBlock SelectionChain")
+	group := this.Group.SelectionChain(blockhash)
+
+	if group == nil {
+		isFirst = true
+	} else {
+		isFirst = false
+		//取本组最后一个块
+		// fmt.Println("获取本组最后一个块", len(group.Blocks))
+		preBlock = group.Blocks[len(group.Blocks)-1]
+		// engine.Log.Info("1前置区块 %+v", preBlock)
+	}
+	// engine.Log.Info("是否是本组第一个块 %v", isFirst)
+
+	//找到上一个组
+	preGroup := this.Group
+	var preGroupBlock *Group
+	var ok bool
+	for {
+		// if preGroup.Height > logblockheight || preGroup.Height < 145137 {
+		// 	engine.Log.Info("-----------寻找上一组 1111 %d", preGroup.Height)
+		// }
+		ok = false
+		preGroup = preGroup.PreGroup
+
+		ok, preGroupBlock = preGroup.CheckBlockGroup(blockhash)
+
+		if ok {
+			// engine.Log.Info("-----------寻找上一组 222222222")
+			if isFirst {
+				//取本组最后一个块
+				// engine.Log.Info("获取上一组最后一个块")
+				preBlock = preGroupBlock.Blocks[len(preGroupBlock.Blocks)-1]
+				// engine.Log.Info("2前置区块", preBlock)
+			}
+			break
+		}
+		// engine.Log.Info("-----------寻找上一组 3333333")
+	}
+
+	// for {
+	// 	if bytes.Equal(preBlock.Id, bh.Previousblockhash) {
+	// 		break
+	// 	} else {
+	// 		if preBlock.Height <= bh.Height-1 {
+	// 			//找不到这个区块了，因为高度都不一样了
+	// 			break
+	// 		} else {
+	// 			preBlock = preBlock.PreBlock
+	// 		}
+	// 	}
+	// }
+
+	preWitness := this.PreWitness
+	for {
+		if preWitness == nil {
+			break
+		}
+		if preWitness.Block == nil {
+			preWitness = preWitness.PreWitness
+			continue
+		}
+
+		if bytes.Equal(preWitness.Block.Id, *blockhash) {
+
+			preBlock = preWitness.Block
+			break
+		}
+		preWitness = preWitness.PreWitness
+		// engine.Log.Info("-----------寻找上一个块 444444444")
+	}
+
+	//查找出未确认的块
+	blocks := make([]Block, 0)
+	if preGroup.Height != this.Group.Height {
+		for _, one := range preGroupBlock.Blocks {
+			blocks = append(blocks, *one)
+		}
+	}
+	if group != nil {
+		for _, one := range group.Blocks {
+			blocks = append(blocks, *one)
+		}
+	}
+	return preBlock, blocks
+}
+
+// var testBug = false
+
+/*
 	见证人方式出块
 	出块并广播
 	@gh    uint64    出块的组高度
@@ -125,13 +313,19 @@ func (this *Witness) FindUnconfirmedBlock() (*Block, []Block) {
 */
 func (this *Witness) BuildBlock() {
 	// var this *Witness
-	addr := keystore.GetCoinbase()
+	addrInfo := keystore.GetCoinbase()
 
 	//自己是见证人才能出块，否则自己出块了，其他节点也不会承认
-	if !bytes.Equal(*this.Addr, addr) {
+	if !bytes.Equal(*this.Addr, addrInfo.Addr) {
 		return
 	}
 
+	//本节点未同步完成，则不应该出块
+	if !GetLongChain().SyncBlockFinish {
+		return
+	}
+
+	// start := time.Now()
 	// fmt.Println("===准备出块===")
 	engine.Log.Info("=== start building blocks === group height:%d", this.Group.Height)
 
@@ -140,31 +334,32 @@ func (this *Witness) BuildBlock() {
 
 	//查找出未确认的块
 	preBlock, blocks := this.FindUnconfirmedBlock()
+	// engine.Log.Info("上一个块高度 %d %d %d", preBlock.Height, blocks[0].Height, blocks[0].witness.Group.Height)
+	// engine.Log.Info("获取上一个块高度消耗时间 %s", time.Now().Sub(start))
 
 	//存放交易
 	tx := make([]TxItr, 0)
 	txids := make([][]byte, 0)
 
+	var reward *Tx_reward
 	//检查本组是否给上一组见证人奖励
 	if this.WitnessBackupGroup != preBlock.witness.WitnessBackupGroup {
 		// engine.Log.Info("开始构建上一组见证人奖励 %s %d", fmt.Sprintf("%p", preBlock.witness.WitnessBackupGroup), preBlock.witness.Group.Height)
-		reward := preBlock.witness.WitnessBackupGroup.CountRewardToWitnessGroup(preBlock.Height+1, blocks)
+		reward = preBlock.witness.WitnessBackupGroup.CountRewardToWitnessGroup(preBlock.Height+1, blocks, preBlock)
 		tx = append(tx, reward)
 		txids = append(txids, reward.Hash)
 	}
 
-	// //如果是本组首个块，计算上一组旷工奖励
-	// if isFirst {
-	// 	reward := preGroup.CountReward(preBlock.Height + 1)
-	// 	tx = append(tx, reward)
-	// 	txids = append(txids, reward.Hash)
-	// }
+	// engine.Log.Info("构建区块奖励消耗时间 %s", time.Now().Sub(start))
 
 	//打包所有交易
 	chain := forks.GetLongChain()
-	txs, ids := chain.transactionManager.Package(blocks)
+
+	txs, ids := chain.transactionManager.Package(reward, preBlock.Height+1, blocks, this.CreateBlockTime)
 	tx = append(tx, txs...)
 	txids = append(txids, ids...)
+
+	// engine.Log.Info("打包消耗时间 %s", time.Now().Sub(start))
 
 	//准备块中的交易
 	// fmt.Println("准备块中的交易")
@@ -181,11 +376,18 @@ func (this *Witness) BuildBlock() {
 			NTx:               uint64(len(tx)),     //交易数量
 			Tx:                txids,               //本区块包含的交易id
 			Time:              now + i,             //unix时间戳
-			Witness:           coinbase,            //此块矿工地址
+			Witness:           coinbase.Addr,       //此块矿工地址
 		}
+
+		// if !testBug && bh.Height > config.Mining_block_start_height+12 && this.Group.FirstWitness() {
+		// 	engine.Log.Error("把区块高度减1")
+		// 	testBug = true
+		// 	bh.Height = bh.Height - 1
+		// }
+
 		bh.BuildMerkleRoot()
-		bh.BuildSign(coinbase)
-		bh.BuildHash()
+		bh.BuildSign(coinbase.Addr)
+		bh.BuildBlockHash()
 		if bh.CheckHashExist() {
 			bh = nil
 			continue
@@ -199,16 +401,41 @@ func (this *Witness) BuildBlock() {
 		return
 	}
 
-	bhvo := CreateBlockHeadVO(bh, tx)
+	bhvo := CreateBlockHeadVO(config.StartBlockHash, bh, tx)
 
 	engine.Log.Info("=== build block Success === group height:%d block height:%d", bhvo.BH.GroupHeight, bhvo.BH.Height)
 	engine.Log.Info("=== build block Success === Block hash %s", hex.EncodeToString(bhvo.BH.Hash))
 	engine.Log.Info("=== build block Success === pre Block hash %s", hex.EncodeToString(bhvo.BH.Previousblockhash))
 	//先保存到数据库再广播，否则其他节点查询不到
-	forks.AddBlockHead(bhvo)
-	//广播区块
-	go MulticastBlock(*bhvo)
+	// SaveBlockHead(bhvo)
 
+	bhvo.FromBroadcast = true
+
+	// <<<<<<< HEAD
+	// 	err := MulticastBlockAndImport(bhvo)
+	// 	if err != nil {
+	// 		return
+	// 	}
+
+	// 	forks.AddBlockHead(bhvo)
+
+	// 	//广播区块
+	// 	go MulticastBlock(*bhvo)
+	// =======
+	UniformityMulticastBlock(bhvo)
+
+	// bhvo.FromBroadcast = true
+
+	// err := MulticastBlockAndImport(bhvo)
+	// if err != nil {
+	// 	return
+	// }
+
+	// forks.AddBlockHead(bhvo)
+
+	// //广播区块
+	// go MulticastBlock(*bhvo)
+	// >>>>>>> dev
 }
 
 // /*
@@ -336,9 +563,9 @@ func Seekvote() {
 		//添加自己为竞选
 		//		AddElection(ele)
 
-		ele := NewElection(&nodeStore.NodeSelf.IdInfo.Id)
+		// ele := NewElection(&nodeStore.NodeSelf.IdInfo.Id)
 
-		message_center.SendMulticastMsg(config.MSGID_multicast_vote_recv, ele.JSON())
+		// message_center.SendMulticastMsg(config.MSGID_multicast_vote_recv, ele.JSON())
 
 		// //		content := []byte(*nodeStore.NodeSelf.IdInfo.Id)
 		// head := mc.NewMessageHead(nil, nil, false)
@@ -365,9 +592,149 @@ func Seekvote() {
 	广播挖到的区块
 */
 func MulticastBlock(bhVO BlockHeadVO) {
-	bs, err := bhVO.Json()
+	goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+	_, file, line, _ := runtime.Caller(0)
+	engine.AddRuntime(file, line, goroutineId)
+	defer engine.DelRuntime(file, line, goroutineId)
+	bs, err := bhVO.Proto() //bhVO.Json()
 	if err != nil {
 		return
 	}
 	message_center.SendMulticastMsg(config.MSGID_multicast_blockhead, bs)
+}
+
+/*
+	广播挖到的区块，当各个见证人都收到后，导入区块
+*/
+func MulticastBlockAndImport(bhVO *BlockHeadVO) error {
+	// goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+	// _, file, line, _ := runtime.Caller(0)
+	// engine.AddRuntime(file, line, goroutineId)
+	// defer engine.DelRuntime(file, line, goroutineId)
+	bs, err := bhVO.Proto() //bhVO.Json()
+	if err != nil {
+		return err
+	}
+
+	head := message_center.NewMessageHead(nil, nil, false)
+	body := message_center.NewMessageBody(config.MSGID_multicast_witness_blockhead, bs, 0, nil, 0)
+	message := message_center.NewMessage(head, body)
+	message.BuildHash()
+	//先保存这个消息到缓存
+	err = new(sqlite3_db.MessageCache).Add(message.Body.Hash, head.Proto(), body.Proto())
+	if err != nil {
+		engine.Log.Error(err.Error())
+		return err
+	}
+	engine.Log.Info("multicast message hash:%s", hex.EncodeToString(message.Body.Hash))
+	return MulticastBlockSync(message)
+}
+
+/*
+	广播挖到的区块，当各个见证人都收到后，导入区块
+*/
+func MulticastBlockSync(message *message_center.Message) error {
+	whiltlistNodes := nodeStore.GetWhiltListNodes()
+	return message_center.BroadcastsAll(1, config.MSGID_multicast_witness_blockhead, whiltlistNodes, nil, nil, &message.Body.Hash)
+}
+
+func UniformityMulticastBlock(bhVO *BlockHeadVO) {
+
+	bs, err := bhVO.Proto() //bhVO.Json()
+	if err != nil {
+		return
+	}
+
+	head := message_center.NewMessageHead(nil, nil, false)
+	body := message_center.NewMessageBody(config.MSGID_multicast_witness_blockhead, bs, 0, nil, 0)
+	message := message_center.NewMessage(head, body)
+	message.BuildHash()
+	//先保存这个消息到缓存
+	// engine.Log.Info("保存消息到缓存:%s", hex.EncodeToString(message.Body.Hash))
+	err = new(sqlite3_db.MessageCache).Add(message.Body.Hash, head.Proto(), body.Proto())
+	if err != nil {
+		engine.Log.Error("save message cache error:%s", err.Error())
+		return
+	}
+
+	AddBlockToCache(bhVO)
+	//先广播区块并确认到达
+	// engine.Log.Info("广播区块hash:%s", hex.EncodeToString(bhVO.BH.Hash))
+	err = UniformityBroadcasts(&message.Body.Hash, config.MSGID_uniformity_multicast_witness_blockhead, config.CLASS_uniformity_witness_multicas_blockhead, config.Wallet_sync_block_timeout)
+	if err != nil {
+		engine.Log.Info("multcas blockhash error:%s", err.Error())
+		return
+	}
+	//再发送导入命令
+	err = UniformityBroadcasts(&bhVO.BH.Hash, config.MSGID_uniformity_multicast_witness_block_import, config.CLASS_uniformity_witness_multicas_block_import, config.Wallet_sync_block_timeout)
+	if err != nil {
+		engine.Log.Info("multcas import block error:%s", err.Error())
+		return
+	}
+	engine.Log.Info("start import block")
+	ImportBlockByCache(&bhVO.BH.Hash)
+
+}
+
+/*
+	发送广播
+*/
+func UniformityBroadcasts(hash *[]byte, msgid uint64, waitRequestClass string, timeout int64) error {
+	// timeout := 4
+	// timeoutloopTotal := config.Wallet_multicas_block_time / timeout
+	whiltlistNodes := nodeStore.GetWhiltListNodes()
+	//给已发送的节点放map里，避免重复发送
+	allNodes := make(map[string]bool)
+
+	var timeouterrorlock = new(sync.Mutex)
+	var timeouterror error
+
+	//先发送给超级节点
+	// superNodes := nodeStore.GetLogicNodes()
+	//排除重复的地址
+	// superNodes = nodeStore.RemoveDuplicateAddress(superNodes)
+	cs := make(chan bool, config.CPUNUM)
+	group := new(sync.WaitGroup)
+	for i, _ := range whiltlistNodes {
+		sessionid := whiltlistNodes[i]
+		//不要发送给自己
+		if bytes.Equal(nodeStore.NodeSelf.IdInfo.Id, sessionid) {
+			continue
+		}
+		_, ok := allNodes[utils.Bytes2string(sessionid)]
+		if ok {
+			// engine.Log.Info("repeat node addr: %s", sessionid.B58String())
+			continue
+		}
+		allNodes[utils.Bytes2string(sessionid)] = false
+		cs <- false
+		group.Add(1)
+		//区块广播给节点
+		// engine.Log.Info("multcast super node:%s", sessionid.B58String())
+		utils.Go(func() {
+			success := false
+			_, err := message_center.SendNeighborWithReplyMsg(msgid, &sessionid, hash, waitRequestClass, timeout)
+			if err == nil {
+				success = true
+			} else {
+				if err.Error() == config.ERROR_wait_msg_timeout.Error() {
+				} else {
+					//其他错误不管，当作发送成功
+					success = true
+				}
+			}
+			if !success {
+				timeouterrorlock.Lock()
+				timeouterror = config.ERROR_wait_msg_timeout
+				timeouterrorlock.Lock()
+			}
+			<-cs
+			group.Done()
+		})
+	}
+	group.Wait()
+	// engine.Log.Info("multicast whilt list node time %s", time.Now().Sub(start))
+
+	// engine.Log.Info("multicast proxy node time %s", time.Now().Sub(start))
+	return timeouterror
 }

@@ -3,13 +3,9 @@ package sharebox
 import (
 	"mandela/config"
 	sql "mandela/sqlite3_db"
-
-	//"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
-
-	//"path/filepath"
 	"sync"
 	"time"
 )

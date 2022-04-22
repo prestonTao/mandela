@@ -1,0 +1,27 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+import "node.proto";
+
+message SearchNodeInfo {
+	bytes	Id       = 1 ; //
+	bytes   SuperId  = 2 ; //
+	bytes   CPuk     = 3 ; //
+}
+
+
+
+message ShareKey {
+	IdInfo      Idinfo        = 1 ;      //身份密钥公钥
+	bytes       A_DH_PUK      = 2 ;      //A公钥
+	bytes       B_DH_PUK      = 3 ;      //B公钥
+}
+

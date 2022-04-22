@@ -14,7 +14,7 @@ func BuildMerkleRoot(tx [][]byte) []byte {
 
 	if len(tx) == 1 {
 		b := make([]byte, 8)
-		binary.BigEndian.PutUint64(b, 1)
+		binary.LittleEndian.PutUint64(b, 1)
 		return Hash_SHA3_256(append(b, append(tx[0], tx[0]...)...))
 	}
 
@@ -28,7 +28,7 @@ func BuildMerkleRoot(tx [][]byte) []byte {
 func merkleroot(level uint64, tx [][]byte) [][]byte {
 	//	fmt.Println("计算默克尔树", len(tx))
 	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, level)
+	binary.LittleEndian.PutUint64(b, level)
 	//	fmt.Println("计算默克尔树", b)
 	if len(tx) == 1 {
 		return [][]byte{append(b, tx[0]...)}

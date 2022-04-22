@@ -7,7 +7,7 @@ import (
 )
 
 func FindWitnessName(addr crypto.AddressCoin) string {
-	value, err := db.Find(append([]byte(config.WitnessAddr), addr...))
+	value, err := db.LevelTempDB.Find(append([]byte(config.WitnessAddr), addr...))
 	if err != nil {
 		return ""
 	}
@@ -15,7 +15,7 @@ func FindWitnessName(addr crypto.AddressCoin) string {
 }
 
 func FindWitnessAddr(name string) *crypto.AddressCoin {
-	value, err := db.Find(append([]byte(config.WitnessName), []byte(name)...))
+	value, err := db.LevelTempDB.Find(append([]byte(config.WitnessName), []byte(name)...))
 	if err != nil {
 		return nil
 	}
@@ -26,13 +26,13 @@ func FindWitnessAddr(name string) *crypto.AddressCoin {
 func SaveWitnessName(addr crypto.AddressCoin, name string) {
 	bs := []byte(name)
 	addrBs := []byte(addr)
-	db.Save(append([]byte(config.WitnessAddr), addr...), &bs)
-	db.Save(append([]byte(config.WitnessName), bs...), &addrBs)
+	db.LevelTempDB.Save(append([]byte(config.WitnessAddr), addr...), &bs)
+	db.LevelTempDB.Save(append([]byte(config.WitnessName), bs...), &addrBs)
 }
 func DelWitnessName(name string) {
 	addr := FindWitnessAddr(name)
-	db.Remove(append([]byte(config.WitnessName), []byte(name)...))
+	db.LevelTempDB.Remove(append([]byte(config.WitnessName), []byte(name)...))
 	if addr != nil {
-		db.Remove(append([]byte(config.WitnessAddr), *addr...))
+		db.LevelTempDB.Remove(append([]byte(config.WitnessAddr), *addr...))
 	}
 }

@@ -34,7 +34,7 @@ func GetBinary(key []byte) string {
 }
 func IntToBytes(n int64) []byte {
 	bytesBuffer := bytes.NewBuffer([]byte{})
-	binary.Write(bytesBuffer, binary.BigEndian, n)
+	binary.Write(bytesBuffer, binary.LittleEndian, n)
 	return bytesBuffer.Bytes()
 }
 

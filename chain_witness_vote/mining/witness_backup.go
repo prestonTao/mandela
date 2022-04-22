@@ -1,8 +1,11 @@
 package mining
 
 import (
+	"mandela/chain_witness_vote/db"
 	"mandela/config"
 	"mandela/core/engine"
+	"mandela/core/keystore"
+	"mandela/core/utils"
 	"mandela/core/utils/crypto"
 	"bytes"
 	"sort"
@@ -69,13 +72,18 @@ func (this *WitnessBackup) CountWitness(txs *[]TxItr) {
 			}
 		case config.Wallet_tx_type_deposit_out:
 			for _, two := range *one.GetVin() {
-				txItr, err := FindTxBase(two.Txid)
+				//因为有可能退回金额不够手续费，所以输入中加入了其他类型交易
+				if ParseTxClass(two.Txid) != config.Wallet_tx_type_deposit_in || two.Vout != 0 {
+					continue
+				}
+				txItr, err := LoadTxBase(two.Txid)
+				// txItr, err := FindTxBase(two.Txid)
 				if err != nil {
 					continue
 				}
-				if txItr.Class() != config.Wallet_tx_type_deposit_in {
-					continue
-				}
+				// if txItr.Class() != config.Wallet_tx_type_deposit_in {
+				// 	continue
+				// }
 				depositIn := txItr.(*Tx_deposit_in)
 				addr := crypto.BuildAddr(config.AddrPre, depositIn.Puk)
 				this.DelWitness(&addr)
@@ -111,7 +119,13 @@ func (this *WitnessBackup) CountWitness(txs *[]TxItr) {
 		case config.Wallet_tx_type_vote_out:
 
 			for _, oneVin := range *one.GetVin() {
-				txItr, err := FindTxBase(oneVin.Txid)
+				//因为有可能退回金额不够手续费，所以输入中加入了其他类型交易
+				if ParseTxClass(oneVin.Txid) != config.Wallet_tx_type_vote_in || oneVin.Vout != 0 {
+					continue
+				}
+
+				txItr, err := LoadTxBase(oneVin.Txid)
+				// txItr, err := FindTxBase(oneVin.Txid)
 				if err != nil {
 					continue
 				}
@@ -126,9 +140,9 @@ func (this *WitnessBackup) CountWitness(txs *[]TxItr) {
 				// 	continue
 				// }
 				//因为有可能退回金额不够手续费，所以输入中加入了其他类型交易
-				if txItr.Class() != config.Wallet_tx_type_vote_in {
-					continue
-				}
+				// if txItr.Class() != config.Wallet_tx_type_vote_in {
+				// 	continue
+				// }
 				vout := (*txItr.GetVout())[oneVin.Vout]
 				votein := txItr.(*Tx_vote_in)
 				this.DelVote(votein.VoteType, &votein.VoteAddr, &vout.Address, vout.Value)
@@ -149,8 +163,8 @@ func (this *WitnessBackup) CountWitness(txs *[]TxItr) {
 /*
 	查询一个见证人是否是候选见证人
 */
-func (this *WitnessBackup) FindWitness(witnessAddr *crypto.AddressCoin) bool {
-	_, ok := this.witnessesMap.Load(witnessAddr.B58String())
+func (this *WitnessBackup) FindWitness(witnessAddr crypto.AddressCoin) bool {
+	_, ok := this.witnessesMap.Load(utils.Bytes2string(witnessAddr))
 	return ok
 }
 
@@ -161,7 +175,8 @@ func (this *WitnessBackup) addWitness(puk []byte, score uint64) {
 	witnessAddr := crypto.BuildAddr(config.AddrPre, puk)
 
 	// engine.Log.Info("添加一个见证人 %s", witnessAddr.B58String())
-	_, ok := this.witnessesMap.Load(witnessAddr.B58String())
+	// _, ok := this.witnessesMap.Load(witnessAddr.B58String())
+	_, ok := this.witnessesMap.Load(utils.Bytes2string(witnessAddr))
 	if ok {
 		// fmt.Println("见证人已经存在")
 		return
@@ -186,7 +201,7 @@ func (this *WitnessBackup) addWitness(puk []byte, score uint64) {
 	this.lock.Lock()
 	this.witnesses = append(this.witnesses, witness)
 	this.lock.Unlock()
-	this.witnessesMap.Store(witnessAddr.B58String(), witness)
+	this.witnessesMap.Store(utils.Bytes2string(witnessAddr), witness)
 }
 
 /*
@@ -206,7 +221,7 @@ func (this *WitnessBackup) DelWitness(witnessAddr *crypto.AddressCoin) {
 	}
 	//	fmt.Println("++++++删除备用见证人后", len(this.witnesses))
 	this.lock.Unlock()
-	this.witnessesMap.Delete(witnessAddr.B58String())
+	this.witnessesMap.Delete(utils.Bytes2string(*witnessAddr))
 }
 
 /*
@@ -253,21 +268,23 @@ func (this *WitnessBackup) addVote(voteType uint16, witnessAddr, voteAddr *crypt
 			return
 		}
 
+		// engine.Log.Info("添加社区节点开始高度的区块:%s", voteAddr.B58String())
+
 		//保存到投票者索引列表
-		this.VoteCommunityList.Store(voteAddr.B58String(), newVote)
+		this.VoteCommunityList.Store(utils.Bytes2string(*voteAddr), newVote)
 		//保存到见证人索引列表
-		v, ok := this.VoteCommunity.Load(witnessAddr.B58String())
+		v, ok := this.VoteCommunity.Load(utils.Bytes2string(*witnessAddr))
 		if ok {
 			vss := v.(*[]*VoteScore)
 			*vss = append(*vss, newVote)
 		} else {
 			vss := make([]*VoteScore, 0)
 			vss = append(vss, newVote)
-			this.VoteCommunity.Store(witnessAddr.B58String(), &vss)
+			this.VoteCommunity.Store(utils.Bytes2string(*witnessAddr), &vss)
 		}
 
 		//新添加的社区，统计这个社区投票数量
-		v, ok = this.Vote.Load(voteAddr.B58String())
+		v, ok = this.Vote.Load(utils.Bytes2string(*voteAddr))
 		if ok {
 			vss := v.(*[]*VoteScore)
 			voteNum := uint64(0)
@@ -276,7 +293,7 @@ func (this *WitnessBackup) addVote(voteType uint16, witnessAddr, voteAddr *crypt
 			}
 			newVote.Vote = voteNum
 			//见证人已存在，则把投票数量加给见证人
-			v, ok := this.witnessesMap.Load(witnessAddr.B58String())
+			v, ok := this.witnessesMap.Load(utils.Bytes2string(*witnessAddr))
 			if ok {
 				bw := v.(*BackupWitness)
 				bw.VoteNum = bw.VoteNum + voteNum
@@ -296,35 +313,47 @@ func (this *WitnessBackup) addVote(voteType uint16, witnessAddr, voteAddr *crypt
 				//不能给多个社区节点投票
 				return
 			}
+
+			// if bytes.Equal(*voteAddr, config.SpecialAddrs) {
+			// 	engine.Log.Debug("1节点 %s 给社区节点 %s 原有:%d 增加投票:%d 剩余:%d", voteAddr.B58String(), witnessAddr.B58String(), vs.Scores, score, vs.Scores+score)
+			// }
 			//追加投票
 			vs.Scores = vs.Scores + score
 			// engine.Log.Info("给社区节点投票 222222222 d%", vs.Scores)
 		} else {
-			engine.Log.Debug("1节点 %s 给社区节点 %s 增加投票 %d", voteAddr.B58String(), witnessAddr.B58String(), score)
+			// engine.Log.Debug("1节点 %s 给社区节点 %s 增加投票 %d", voteAddr.B58String(), witnessAddr.B58String(), score)
 			//			engine.Log.Info("给社区节点投票 %s %+v", voteAddr.B58String(), newVote)
-			this.VoteList.Store(voteAddr.B58String(), newVote)
+			this.VoteList.Store(utils.Bytes2string(*voteAddr), newVote)
 
-			v, ok := this.Vote.Load(witnessAddr.B58String())
+			v, ok := this.Vote.Load(utils.Bytes2string(*witnessAddr))
 			if ok {
 				vss := v.(*[]*VoteScore)
 				*vss = append(*vss, newVote)
+				// if bytes.Equal(*voteAddr, config.SpecialAddrs) {
+				// 	engine.Log.Debug("1节点 %s 给社区节点 %s 原有:%d 增加投票:%d 剩余:%d", voteAddr.B58String(), witnessAddr.B58String(), 0, score, 0)
+				// }
 			} else {
 				vss := make([]*VoteScore, 0)
 				vss = append(vss, newVote)
-				this.Vote.Store(witnessAddr.B58String(), &vss)
+				this.Vote.Store(utils.Bytes2string(*witnessAddr), &vss)
+				// if bytes.Equal(*voteAddr, config.SpecialAddrs) {
+				// 	engine.Log.Debug("1节点 %s 给社区节点 %s 原有:%d 增加投票:%d 剩余:%d", voteAddr.B58String(), witnessAddr.B58String(), 0, score, 0)
+				// }
 			}
 
 		}
 
 		//如果社区节点已经存在，则给社区节点添加投票数量
-		v, ok := this.VoteCommunityList.Load(witnessAddr.B58String())
+		v, ok := this.VoteCommunityList.Load(utils.Bytes2string(*witnessAddr))
 		if ok {
 			vs := v.(*VoteScore)
 			vs.Vote = vs.Vote + score
 			// engine.Log.Info("给社区节点投票 44444444444 d%", vs.Vote)
-
+			if bytes.Equal(*voteAddr, config.SpecialAddrs) {
+				// engine.Log.Debug("1节点 %s 给社区节点 %s 增加投票:%d 剩余:%d", voteAddr.B58String(), witnessAddr.B58String(), score, vs.Vote)
+			}
 			//如果见证人已经存在，则给见证人添加投票数量
-			v, ok := this.witnessesMap.Load(vs.Witness.B58String())
+			v, ok := this.witnessesMap.Load(utils.Bytes2string(*vs.Witness))
 			if ok {
 				bw := v.(*BackupWitness)
 				bw.VoteNum = bw.VoteNum + score
@@ -343,13 +372,13 @@ func (this *WitnessBackup) addVote(voteType uint16, witnessAddr, voteAddr *crypt
 			return
 		}
 
-		v, ok := this.LightNode.Load(voteAddr.B58String())
+		v, ok := this.LightNode.Load(utils.Bytes2string(*voteAddr))
 		if ok {
 			vs := v.(*VoteScore)
 			vs.Scores = vs.Scores + score
 			return
 		}
-		this.LightNode.Store(voteAddr.B58String(), newVote)
+		this.LightNode.Store(utils.Bytes2string(*voteAddr), newVote)
 
 	default:
 		return
@@ -370,19 +399,24 @@ func (this *WitnessBackup) DelVote(voteType uint16, witnessAddr, voteAddr *crypt
 	switch voteType {
 	case 1: //1=给见证人投票
 
-		v, ok := this.VoteCommunityList.Load(voteAddr.B58String())
+		// engine.Log.Info("删除社区节点开始高度的区块:%s", voteAddr.B58String())
+
+		v, ok := this.VoteCommunityList.Load(utils.Bytes2string(*voteAddr))
 		if !ok {
+			// engine.Log.Info("删除社区节点开始高度的区块 不存在:%s", voteAddr.B58String())
 			return
 		}
 		vs := v.(*VoteScore)
 		vs.Scores = vs.Scores - score
+		// engine.Log.Info("删除社区节点开始高度的区块:%s %d", voteAddr.B58String(), vs.Scores)
 		//投票数量为0则删除这个节点的记录
 		if vs.Scores > 0 {
+			// engine.Log.Info("此社区节点票数大于0，则不删除:%s", voteAddr.B58String())
 			return
 		}
 
 		//统计这个社区的所有投票，见证人减少这些投票
-		v, ok = this.Vote.Load(voteAddr.B58String())
+		v, ok = this.Vote.Load(utils.Bytes2string(*voteAddr))
 		if ok {
 			vss := v.(*[]*VoteScore)
 			voteNum := uint64(0)
@@ -390,17 +424,21 @@ func (this *WitnessBackup) DelVote(voteType uint16, witnessAddr, voteAddr *crypt
 				voteNum = voteNum + one.Scores
 			}
 			//见证人已存在，则把投票数量减少
-			v, ok := this.witnessesMap.Load(witnessAddr.B58String())
+			v, ok := this.witnessesMap.Load(utils.Bytes2string(*witnessAddr))
 			if ok {
 				bw := v.(*BackupWitness)
 				bw.VoteNum = bw.VoteNum - voteNum
 			}
 		}
 
+		// engine.Log.Info("删除社区节点开始高度的区块:%s", voteAddr.B58String())
+		//删除社区节点开始高度的区块
+		db.LevelTempDB.Remove(BuildCommunityAddrStartHeight(*voteAddr))
+
 		//先从投票者记录中删除
-		this.VoteCommunityList.Delete(voteAddr.B58String())
+		this.VoteCommunityList.Delete(utils.Bytes2string(*voteAddr))
 		//
-		v, ok = this.VoteCommunity.Load(witnessAddr.B58String())
+		v, ok = this.VoteCommunity.Load(utils.Bytes2string(*witnessAddr))
 		if !ok {
 			return
 		}
@@ -409,31 +447,33 @@ func (this *WitnessBackup) DelVote(voteType uint16, witnessAddr, voteAddr *crypt
 			if bytes.Equal(*one.Addr, *voteAddr) {
 				temp := (*vss)[:i]
 				temp = append(temp, (*vss)[i+1:]...)
-				this.VoteCommunity.Store(witnessAddr.B58String(), &temp)
+				this.VoteCommunity.Store(utils.Bytes2string(*witnessAddr), &temp)
 				break
 			}
 		}
 
 	case 2: //2=给社区节点投票
-		engine.Log.Debug("1节点 %s 给社区节点 %s 减少投票 %d", voteAddr.B58String(), witnessAddr.B58String(), score)
-		v, ok := this.VoteList.Load(voteAddr.B58String())
+		// engine.Log.Debug("1节点 %s 给社区节点 %s 减少投票 %d", voteAddr.B58String(), witnessAddr.B58String(), score)
+		v, ok := this.VoteList.Load(utils.Bytes2string(*voteAddr))
 		if !ok {
-			engine.Log.Debug("2节点 %s 给社区节点 %s 减少投票 %d", voteAddr.B58String(), witnessAddr.B58String(), score)
+			// engine.Log.Debug("2节点 %s 给社区节点 %s 减少投票 %d", voteAddr.B58String(), witnessAddr.B58String(), score)
 			return
 		}
 		vs := v.(*VoteScore)
+		// if bytes.Equal(*voteAddr, config.SpecialAddrs) {
+		// 	engine.Log.Debug("3节点 %s 给社区节点 %s 原有:%d 减少投票:%d 剩余:%d", voteAddr.B58String(), witnessAddr.B58String(), vs.Scores, score, vs.Scores-score)
+		// }
 		vs.Scores = vs.Scores - score
-		engine.Log.Debug("3节点 %s 给社区节点 %s 减少投票 %d", voteAddr.B58String(), witnessAddr.B58String(), vs.Scores)
 		//更新社区节点的投票
 		//如果社区节点已经存在，则给社区节点减少投票数量
-		v, ok = this.VoteCommunityList.Load(witnessAddr.B58String())
+		v, ok = this.VoteCommunityList.Load(utils.Bytes2string(*witnessAddr))
 		if ok {
 			vs := v.(*VoteScore)
 			vs.Vote = vs.Vote - score
-			engine.Log.Debug("4给社区节点减少投票 %d", vs.Vote)
+			// engine.Log.Debug("4给社区节点减少投票 %d", vs.Vote)
 			//更新见证人的投票
 			//如果见证人已经存在，则给见证人减少投票数量
-			v, ok := this.witnessesMap.Load(vs.Witness.B58String())
+			v, ok := this.witnessesMap.Load(utils.Bytes2string(*vs.Witness))
 			if ok {
 				bw := v.(*BackupWitness)
 				bw.VoteNum = bw.VoteNum - score
@@ -442,22 +482,22 @@ func (this *WitnessBackup) DelVote(voteType uint16, witnessAddr, voteAddr *crypt
 
 		//投票数量为0则删除这个节点的记录
 		if vs.Scores > 0 {
-			engine.Log.Debug("5给社区节点减少投票 %d", vs.Scores)
+			// engine.Log.Debug("5给社区节点减少投票 %d", vs.Scores)
 			return
 		}
-		engine.Log.Debug("6给社区节点减少投票 %d", vs.Scores)
+		// engine.Log.Debug("6给社区节点减少投票 %d", vs.Scores)
 		//先从投票者记录中删除
-		this.VoteList.Delete(voteAddr.B58String())
+		this.VoteList.Delete(utils.Bytes2string(*voteAddr))
 
-		v, ok = this.VoteList.Load(voteAddr.B58String())
+		v, ok = this.VoteList.Load(utils.Bytes2string(*voteAddr))
 		if !ok {
-			engine.Log.Debug("7给社区节点减少投票 %s", voteAddr.B58String())
+			// engine.Log.Debug("7给社区节点减少投票 %s", voteAddr.B58String())
 		} else {
 			vs = v.(*VoteScore)
-			engine.Log.Debug("8给社区节点减少投票 %d", vs.Scores)
+			// engine.Log.Debug("8给社区节点减少投票 %d", vs.Scores)
 		}
 		//
-		v, ok = this.Vote.Load(witnessAddr.B58String())
+		v, ok = this.Vote.Load(utils.Bytes2string(*witnessAddr))
 		if !ok {
 			return
 		}
@@ -466,13 +506,13 @@ func (this *WitnessBackup) DelVote(voteType uint16, witnessAddr, voteAddr *crypt
 			if bytes.Equal(*one.Addr, *voteAddr) {
 				temp := (*vss)[:i]
 				temp = append(temp, (*vss)[i+1:]...)
-				this.Vote.Store(witnessAddr.B58String(), &temp)
+				this.Vote.Store(utils.Bytes2string(*witnessAddr), &temp)
 				break
 			}
 		}
 
 	case 3: //3=轻节点押金
-		v, ok := this.LightNode.Load(voteAddr.B58String())
+		v, ok := this.LightNode.Load(utils.Bytes2string(*voteAddr))
 		if !ok {
 			return
 		}
@@ -483,7 +523,7 @@ func (this *WitnessBackup) DelVote(voteType uint16, witnessAddr, voteAddr *crypt
 			return
 		}
 		//从记录中删除
-		this.LightNode.Delete(voteAddr.B58String())
+		this.LightNode.Delete(utils.Bytes2string(*voteAddr))
 	}
 }
 
@@ -506,7 +546,7 @@ func (this *WitnessBackup) haveWitness(witnessAddr *crypto.AddressCoin) (have bo
 	通过见证人查找是否有社区投票
 */
 func (this *WitnessBackup) haveCommunity(witnessAddr *crypto.AddressCoin) (*[]*VoteScore, bool) {
-	v, ok := this.VoteCommunity.Load(witnessAddr.B58String())
+	v, ok := this.VoteCommunity.Load(utils.Bytes2string(*witnessAddr))
 	if ok {
 		value := v.(*[]*VoteScore)
 		return value, ok
@@ -518,7 +558,7 @@ func (this *WitnessBackup) haveCommunity(witnessAddr *crypto.AddressCoin) (*[]*V
 	通过投票者查找是否有社区投票
 */
 func (this *WitnessBackup) haveCommunityList(addr *crypto.AddressCoin) (*VoteScore, bool) {
-	v, ok := this.VoteCommunityList.Load(addr.B58String())
+	v, ok := this.VoteCommunityList.Load(utils.Bytes2string(*addr))
 	if ok {
 		value := v.(*VoteScore)
 		return value, ok
@@ -530,7 +570,7 @@ func (this *WitnessBackup) haveCommunityList(addr *crypto.AddressCoin) (*VoteSco
 	通过社区节点地址查询轻节点
 */
 func (this *WitnessBackup) haveVote(witnessAddr *crypto.AddressCoin) (*[]*VoteScore, bool) {
-	v, ok := this.Vote.Load(witnessAddr.B58String())
+	v, ok := this.Vote.Load(utils.Bytes2string(*witnessAddr))
 	if ok {
 		value := v.(*[]*VoteScore)
 		return value, ok
@@ -542,7 +582,7 @@ func (this *WitnessBackup) haveVote(witnessAddr *crypto.AddressCoin) (*[]*VoteSc
 	通过投票者查找是否有投票者
 */
 func (this *WitnessBackup) haveVoteList(addr *crypto.AddressCoin) (*VoteScore, bool) {
-	v, ok := this.VoteList.Load(addr.B58String())
+	v, ok := this.VoteList.Load(utils.Bytes2string(*addr))
 	if ok {
 		value := v.(*VoteScore)
 		return value, ok
@@ -554,7 +594,7 @@ func (this *WitnessBackup) haveVoteList(addr *crypto.AddressCoin) (*VoteScore, b
 	通过投票者查找轻节点押金
 */
 func (this *WitnessBackup) haveLight(addr *crypto.AddressCoin) (*VoteScore, bool) {
-	v, ok := this.LightNode.Load(addr.B58String())
+	v, ok := this.LightNode.Load(utils.Bytes2string(*addr))
 	if ok {
 		value := v.(*VoteScore)
 		return value, ok
@@ -582,29 +622,37 @@ func (this *WitnessBackup) CreateWitnessGroup() []*Witness {
 		// fmt.Println("见证人列表为空")
 		return nil
 	}
-
 	wbg := this.GetWitnessListSort()
 
-	random := this.chain.HashRandom()
-	// fmt.Println("前n个块hash", hex.EncodeToString(*random))
-	wbg.Witnesses = OrderWitness(wbg.Witnesses, random)
-	// wbg.Witnesses = make([]*Witness, 0)
-	// last := start
-	// for {
-	// 	if last == nil {
-	// 		break
-	// 	}
-	// 	// fmt.Println("备用见证人排序", last.Addr)
-	// 	wbg.Witnesses = append(wbg.Witnesses, last)
-	// 	last.WitnessBackupGroup = wbg
-	// 	last = last.NextWitness
-	// }
-	// start.GroupStart = true
+	//待出块的见证人，加入白名单连接
 
-	for i, _ := range wbg.Witnesses {
-		wbg.Witnesses[i].WitnessBackupGroup = wbg
+	IsBackup := this.chain.witnessChain.FindWitness(keystore.GetCoinbase().Addr)
+	if IsBackup {
+		witnessAddrCoins := make([]*crypto.AddressCoin, 0)
+		for _, one := range wbg.Witnesses {
+			witnessAddrCoins = append(witnessAddrCoins, one.Addr)
+		}
+		//异步添加白名单连接
+		go AddWitnessAddrNets(witnessAddrCoins)
+		// utils.Go(AddWitnessAddrNets(witnessAddrCoins))
 	}
 
+	for _, one := range wbg.Witnesses {
+		total := uint64(0)
+		for _, two := range one.CommunityVotes {
+			// engine.Log.Info("vote one :%s %d", two.Addr.B58String(), two.Vote)
+			total += two.Vote
+		}
+		// engine.Log.Info("total :%d", total)
+	}
+
+	random := this.chain.HashRandom()
+	// engine.Log.Info("前n个块hash %s", hex.EncodeToString(*random))
+	wbg.Witnesses = OrderWitness(wbg.Witnesses, random)
+	for i, _ := range wbg.Witnesses {
+		// engine.Log.Info("排序后的顺序 %s", wbg.Witnesses[i].Addr.B58String())
+		wbg.Witnesses[i].WitnessBackupGroup = wbg
+	}
 	return wbg.Witnesses
 }
 
@@ -615,7 +663,8 @@ func (this *WitnessBackup) PrintWitnessBackup() {
 	// fmt.Println("打印备用见证人")
 
 	this.lock.Lock()
-	sort.Sort(this)
+	// sort.Sort(this)
+	sort.Stable(this)
 	this.lock.Unlock()
 
 	for i, one := range this.witnesses {
@@ -632,46 +681,65 @@ func (this *WitnessBackup) PrintWitnessBackup() {
 	加入黑名单
 */
 func (this *WitnessBackup) AddBlackList(addr crypto.AddressCoin) {
+	addrStr := utils.Bytes2string(addr)
+	// engine.Log.Info("黑名单中 +1 %s", addrStr)
 	//在备用见证人里面才加入黑名单
-	_, ok := this.witnessesMap.Load(addr.B58String())
-	if !ok {
-		return
-	}
-	v, ok := this.Blacklist.Load(addr.B58String())
+	// _, ok := this.witnessesMap.Load(addrStr)
+	// if !ok {
+	// 	engine.Log.Info("不在备用见证人列表中")
+	// 	return
+	// }
+	v, ok := this.Blacklist.Load(addrStr)
 	if ok {
 		total := v.(uint64)
 		//最多连续不出块3个
 		if total < 3 {
 			total++
 		}
-		this.Blacklist.Store(addr.B58String(), total)
+		this.Blacklist.Store(addrStr, total)
+		// value, ok := this.Blacklist.Load(addrStr)
+		// engine.Log.Info("黑名单中的值 %s %d %v", addrStr, value, ok)
 		return
 	}
-	this.Blacklist.Store(addr.B58String(), uint64(1))
+	this.Blacklist.Store(addrStr, uint64(1))
+	// value, ok := this.Blacklist.Load(addrStr)
+	// engine.Log.Info("黑名单中的值 %s %d %v", addrStr, value, ok)
 }
 
 /*
 	继续出块，可以慢慢从列表中移除
 */
 func (this *WitnessBackup) SubBlackList(addr crypto.AddressCoin) {
-	v, ok := this.Blacklist.Load(addr.B58String())
+	addrStr := utils.Bytes2string(addr)
+	// engine.Log.Info("黑名单中 -1 %s", addrStr)
+
+	//在候选见证人列表里才-1
+	_, ok := this.witnessesMap.Load(utils.Bytes2string(addr))
+	if !ok {
+		return
+	}
+
+	v, ok := this.Blacklist.Load(addrStr)
 	if ok {
 		total := v.(uint64)
 		total--
 		//最多连续不出块3个
 		if total <= 0 {
-			this.Blacklist.Delete(addr.B58String())
+			this.Blacklist.Delete(addrStr)
 		} else {
-			this.Blacklist.Store(addr.B58String(), total)
+			this.Blacklist.Store(addrStr, total)
 		}
 	}
+	// value, ok := this.Blacklist.Load(addrStr)
+	// engine.Log.Info("黑名单中的值 %s %d %v", addrStr, value, ok)
 }
 
 /*
 	从黑名单中移除
 */
 func (this *WitnessBackup) DelBlackList(addr crypto.AddressCoin) {
-	this.Blacklist.Delete(addr.B58String())
+	// engine.Log.Info("从黑名单中删除 %s", addr.B58String())
+	this.Blacklist.Delete(utils.Bytes2string(addr))
 }
 
 /*
@@ -707,20 +775,31 @@ type VoteScore struct {
 	在黑名单中查找一个见证人地址，看是否存在
 */
 func (this *WitnessBackup) FindWitnessInBlackList(addr crypto.AddressCoin) (have bool) {
-	addrStr := addr.B58String()
-	have = false
-	this.Blacklist.Range(func(k, v interface{}) bool {
-		total := v.(uint64)
-		if total >= 3 {
-			addrOne := k.(string)
-			if addrStr == addrOne {
-				have = true
-				return false
-			}
-		}
+	// addrStr := addr.B58String()
+	// engine.Log.Info("查找一个见证人是否存在 %s", addrStr)
+	total, ok := this.Blacklist.Load(utils.Bytes2string(addr))
+	// engine.Log.Info("查找结果 %d %v", total, ok)
+	if !ok {
+		return false
+	}
+	if t := total.(uint64); t >= 3 {
 		return true
-	})
-	return
+	}
+	return false
+
+	// have = false
+	// this.Blacklist.Range(func(k, v interface{}) bool {
+	// 	total := v.(uint64)
+	// 	if total >= 3 {
+	// 		addrOne := k.(string)
+	// 		if addrStr == addrOne {
+	// 			have = true
+	// 			return false
+	// 		}
+	// 	}
+	// 	return true
+	// })
+	// return
 }
 
 /*
@@ -728,14 +807,14 @@ func (this *WitnessBackup) FindWitnessInBlackList(addr crypto.AddressCoin) (have
 	@return    *Witness    备用见证人链中的一个见证人指针
 */
 func (this *WitnessBackup) GetWitnessListSort() *WitnessBackupGroup {
-
 	//排除3次未出块的见证人
 	this.Blacklist.Range(func(k, v interface{}) bool {
 		total := v.(uint64)
-		if total >= 3 {
+		if total >= config.Wallet_not_build_block_max {
 			addrStr := k.(string)
 			// engine.Log.Info("本次删除的备用见证人 " + addrStr)
-			addr := crypto.AddressFromB58String(addrStr)
+			// addr := crypto.AddressFromB58String(addrStr)
+			addr := crypto.AddressCoin([]byte(addrStr))
 			this.DelWitness(&addr)
 		}
 		return true
@@ -745,7 +824,8 @@ func (this *WitnessBackup) GetWitnessListSort() *WitnessBackupGroup {
 
 	//按投票数量排序
 	this.lock.Lock()
-	sort.Sort(this)
+	// sort.Sort(this)
+	sort.Stable(this)
 	this.lock.Unlock()
 
 	wbg := WitnessBackupGroup{
@@ -760,6 +840,7 @@ func (this *WitnessBackup) GetWitnessListSort() *WitnessBackupGroup {
 		newWitness.Score = this.witnesses[i].Score
 		newWitness.CommunityVotes, newWitness.Votes = this.FindScore(newWitness.Addr)
 		newWitness.VoteNum = this.witnesses[i].VoteNum
+		newWitness.StopMining = make(chan bool, 1)
 		// newWitness.GroupStart = false
 
 		//取前n个见证人
@@ -781,18 +862,23 @@ func (this *WitnessBackup) GetWitnessListSort() *WitnessBackupGroup {
 	@return    []*VoteScore    轻节点投票列表
 */
 func (this *WitnessBackup) FindScore(addr *crypto.AddressCoin) ([]*VoteScore, []*VoteScore) {
-	// engine.Log.Info("查询这个见证人地址的所有投票 %s", addr.B58String())
+	// if bytes.Equal(*addr, config.SpecialAddrs) {
+	// 	engine.Log.Info("查询这个见证人地址的所有投票 %s", addr.B58String())
+	// }
 	vssAll := make([]*VoteScore, 0)
+	communityScore := make([]*VoteScore, 0)
 
 	//先查找社区
-	v, ok := this.VoteCommunity.Load(addr.B58String())
+	v, ok := this.VoteCommunity.Load(utils.Bytes2string(*addr))
 	if !ok {
-		// engine.Log.Info("查询这个见证人地址的所有投票 11111111111111111111")
-		return vssAll, vssAll
+		// if bytes.Equal(*addr, config.SpecialAddrs) {
+		// 	// engine.Log.Info("查询这个见证人地址的所有投票 %s", addr.B58String())
+		// 	engine.Log.Info("查询这个见证人地址的所有投票 11111111111111111111")
+		// }
+		return communityScore, vssAll
 	}
 	vss := v.(*[]*VoteScore)
 
-	communityScore := make([]*VoteScore, 0)
 	for _, one := range *vss {
 		vs := VoteScore{
 			Witness: one.Witness, //见证人地址。当自己是轻节点的时候，此字段是社区节点地址
@@ -801,11 +887,16 @@ func (this *WitnessBackup) FindScore(addr *crypto.AddressCoin) ([]*VoteScore, []
 			Vote:    one.Vote,    //获得票数
 		}
 		communityScore = append(communityScore, &vs)
+
+		// if bytes.Equal(*one.Addr, config.SpecialAddrs) {
+		// 	engine.Log.Info("查询这个见证人地址的所有投票 %s %d", one.Addr.B58String(), one.Vote)
+		// }
+
 		// engine.Log.Info("查询这个见证人地址的所有投票 2222222222 %d %d", one.Scores, one.Vote)
 	}
 	// engine.Log.Info("查询这个见证人地址的所有投票 3333333333333")
 	for _, one := range *vss {
-		v, ok := this.Vote.Load(one.Addr.B58String())
+		v, ok := this.Vote.Load(utils.Bytes2string(*one.Addr))
 		if !ok {
 			continue
 		}
@@ -819,7 +910,7 @@ func (this *WitnessBackup) FindScore(addr *crypto.AddressCoin) ([]*VoteScore, []
 				Vote:    one.Scores,  //获得票数
 			}
 			vssAll = append(vssAll, &vs)
-			// engine.Log.Info("查询这个见证人地址的所有投票 444444444444 %d", one.Scores)
+			// engine.Log.Info("查询这个见证人地址的所有投票 444444444444 %s %s %d", one.Addr.B58String(), one.Witness.B58String(), one.Scores)
 		}
 		one.Vote = voteNum
 		// engine.Log.Info("查询这个见证人地址的所有投票 555555555555 %d %d", voteNum, one.Vote)
@@ -872,7 +963,7 @@ func (this *WitnessBackup) GetCommunityListSort() []*VoteScoreVO {
 
 		//查询投票总额
 		voteNum := uint64(0)
-		v, ok := this.Vote.Load(vsOne.Addr.B58String())
+		v, ok := this.Vote.Load(utils.Bytes2string(*vsOne.Addr))
 		if ok {
 			vss := v.(*[]*VoteScore)
 			for _, one := range *vss {

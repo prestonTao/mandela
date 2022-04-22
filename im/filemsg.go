@@ -5,21 +5,21 @@ package im
 
 import (
 	"mandela/config"
-	"bytes"
-	"encoding/hex"
-
-	//"mandela/core"
 	"mandela/core/message_center"
 	"mandela/core/message_center/flood"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/sqlite3_db"
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
 	Count  int64 = 20 * 1024 * 1024 * 1024 //单个好友传输总量不超过20G
@@ -188,7 +188,8 @@ func (msg *Msg) SendFile(id int64) (bl bool) {
 		}
 		message, ok, _ := message_center.SendP2pMsgHE(config.MSGID_im_file, &msg.To, &bs)
 		if ok {
-			rbs := flood.WaitRequest(config.CLASS_im_file_msg, hex.EncodeToString(message.Body.Hash), 0)
+			// rbs := flood.WaitRequest(config.CLASS_im_file_msg, hex.EncodeToString(message.Body.Hash), 0)
+			rbs := flood.WaitRequest(config.CLASS_im_file_msg, utils.Bytes2string(message.Body.Hash), 0)
 			if rbs != nil {
 				toid := utils.BytesToInt64(*rbs) //返回对方的消息ID
 				//发送成功，对方已经接收到消息

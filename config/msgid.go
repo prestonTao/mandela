@@ -12,7 +12,8 @@ const (
 	MSGID_getNearSuperIP        = 113 //从邻居节点得到自己的逻辑节点
 	MSGID_getNearSuperIP_recv   = 114 //从邻居节点得到自己的逻辑节点_返回
 	MSGID_multicast_online_recv = 122 //接收节点上线广播
-	MSGID_ask_close_conn_recv   = 128 //询问关闭连接
+	MSGID_ask_close_conn        = 127 //询问关闭连接
+	MSGID_ask_close_conn_recv   = 128 //询问关闭连接_返回
 	MSGID_TextMsg_recv          = 129 //接收消息返回消息
 
 	//---------------- 可靠传输加密通道协议 --------------------------
@@ -67,6 +68,27 @@ const (
 	MSGID_multicast_return        = 211 //收到广播消息回复
 	MSGID_getblockforwitness      = 212 //从邻居节点获取指定见证人的区块
 	MSGID_getblockforwitness_recv = 213 //从邻居节点获取指定见证人的区块_返回
+
+	MSGID_getTransaction_one      = 214 //查询交易
+	MSGID_getTransaction_one_recv = 215 //查询交易_返回
+
+	MSGID_multicast_find_witness      = 216 //广播寻找见证人
+	MSGID_multicast_find_witness_recv = 217 //回复见证人网络地址
+
+	MSGID_getBlockLastCurrent      = 218 //从邻居节点获取已经确认的最高区块
+	MSGID_getBlockLastCurrent_recv = 219 //从邻居节点获取已经确认的最高区块_返回
+
+	MSGID_multicast_witness_blockhead          = 220 //接收见证人之间的区块hash
+	MSGID_multicast_witness_blockhead_recv     = 221 //接收见证人之间的区块hash_返回
+	MSGID_multicast_witness_blockhead_get      = 222 //通过接收到的区块hash获取区块
+	MSGID_multicast_witness_blockhead_get_recv = 223 //通过接收到的区块hash获取区块_返回
+
+	MSGID_uniformity_multicast_witness_blockhead         = 224 //接收见证人之间的区块hash
+	MSGID_uniformity_multicast_witness_blockhead_recv    = 225 //接收见证人之间的区块hash_返回
+	MSGID_uniformity_multicast_witness_block_get         = 226 //通过接收到的区块hash获取区块
+	MSGID_uniformity_multicast_witness_block_get_recv    = 227 //通过接收到的区块hash获取区块_返回
+	MSGID_uniformity_multicast_witness_block_import      = 228 //接收导入区块命令
+	MSGID_uniformity_multicast_witness_block_import_recv = 229 //接收导入区块命令_返回
 
 	//---------------- sharebox 模块 --------------------------
 	MSGID_sharebox_addFileShare                     = 300 //添加一个文件共享

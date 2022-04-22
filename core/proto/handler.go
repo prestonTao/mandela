@@ -23,7 +23,7 @@ func sendMessage(message *mc.Mess) error {
 	updateNum(message.Body.Hash, 1)
 	if message.Send(MSGID_safemsginfo) {
 		//fmt.Println("数据发送成功", id.B58String())
-		bs := mc.WaitRequest(mc.CLASS_safemsginfo, message.Body.Hash.B58String())
+		bs := mc.WaitRequest(mc.CLASS_safemsginfo, utils.Bytes2string(message.Body.Hash))
 		if bs != nil {
 			//消息回调
 			msgid := utils.Multihash(*bs)
@@ -45,7 +45,8 @@ func safemsginfo(c engine.Controller, msg engine.Packet) {
 		// fmt.Println(err)
 		return
 	}
-	form, _ := utils.FromB58String(msg.Session.GetName())
+	// form, _ := utils.FromB58String(msg.Session.GetName())
+	form := utils.Multihash([]byte(msg.Session.GetName()))
 	if message.IsSendOther(&form) {
 		return
 	}
@@ -72,7 +73,8 @@ func safemsginfo_recv(c engine.Controller, msg engine.Packet) {
 		// fmt.Println("error  1", err)
 		return
 	}
-	form, _ := utils.FromB58String(msg.Session.GetName())
+	// form, _ := utils.FromB58String(msg.Session.GetName())
+	form := utils.Multihash([]byte(msg.Session.GetName()))
 	if message.IsSendOther(&form) {
 		return
 	}
@@ -82,5 +84,5 @@ func safemsginfo_recv(c engine.Controller, msg engine.Packet) {
 		engine.NLog.Error(engine.LOG_file, "%s", string(msg.Dataplus))
 		return
 	}
-	mc.ResponseWait(mc.CLASS_safemsginfo, message.Body.Hash.B58String(), message.Body.Content)
+	mc.ResponseWait(mc.CLASS_safemsginfo, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }

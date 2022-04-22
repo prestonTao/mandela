@@ -7,10 +7,13 @@ import (
 	"mandela/core/keystore"
 	"mandela/core/utils"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 func main() {
 	//	BuildMerkleRoot()

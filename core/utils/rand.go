@@ -21,7 +21,7 @@ func RandString(strs ...string) string {
 	获得一个随机数(0 - n]，包含0，不包含n
 */
 func GetRandNum(n int64) int64 {
-	if n == 0 {
+	if n <= 0 {
 		return 0
 	}
 	result, _ := crand.Int(crand.Reader, big.NewInt(int64(n)))
@@ -47,6 +47,6 @@ func GetRandomDomain() string {
 	随机获取一个int64类型的随机数
 */
 func GetRandomOneInt64() int64 {
-	max := BytesToUint64([]byte{255 - 128, 255, 255, 255, 255, 255, 255, 255})
+	max := BytesToUint64([]byte{255, 255, 255, 255, 255, 255, 255, 255 - 128})
 	return GetRandNum(int64(max))
 }

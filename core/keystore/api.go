@@ -3,11 +3,13 @@ package keystore
 import (
 	"mandela/core/utils/crypto"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
 	"golang.org/x/crypto/ed25519"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var keystore *Keystore
 
@@ -83,15 +85,22 @@ func CreateKeystoreRand(fileAbsPath string, rand1, rand2 []byte, password string
 /*
 	获取钱包地址列表，不包括导入的钱包地址
 */
-func GetAddr() []crypto.AddressCoin {
+func GetAddr() []*AddressInfo {
 	return keystore.GetAddr()
+}
+
+/*
+	获取本钱包的网络地址
+*/
+func GetNetAddr(pwd string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
+	return keystore.GetNetAddrPuk(pwd)
 }
 
 /*
 	获取地址列表，包括导入的钱包地址
 */
-func GetAddrAll() []crypto.AddressCoin {
-	addrs := make([]crypto.AddressCoin, 0)
+func GetAddrAll() []*AddressInfo {
+	addrs := make([]*AddressInfo, 0)
 	keystore.lock.RLock()
 	for _, one := range keystore.Wallets {
 		addrs = append(addrs, one.GetAddr()...)
@@ -113,7 +122,7 @@ func GetNewAddr(password string) (crypto.AddressCoin, error) {
 }
 
 //获取基础地址
-func GetCoinbase() crypto.AddressCoin {
+func GetCoinbase() *AddressInfo {
 	wallet := keystore.Wallets[keystore.Coinbase]
 	return wallet.GetCoinbase()
 }
@@ -134,6 +143,30 @@ func GetKeyByAddr(addr crypto.AddressCoin, password string) (rand []byte, prk ed
 	keystore.lock.RLock()
 	for _, one := range keystore.Wallets {
 		rand, prk, puk, err = one.GetKeyByAddr(addr, pwd)
+		if err != nil {
+			break
+		}
+	}
+	if len(puk) == 0 {
+		fmt.Println("公钥不存在")
+		fmt.Printf("wallet:%+v", keystore.Wallets)
+	}
+	if len(prk) == 0 {
+		fmt.Println("私钥不存在")
+		fmt.Printf("wallet:%+v", keystore.Wallets)
+	}
+	keystore.lock.RUnlock()
+	return
+}
+
+/*
+	通过公钥获取密钥
+*/
+func GetKeyByPuk(puk []byte, password string) (rand []byte, prk ed25519.PrivateKey, err error) {
+	pwd := sha256.Sum256([]byte(password))
+	keystore.lock.RLock()
+	for _, one := range keystore.Wallets {
+		rand, prk, err = one.GetKeyByPuk(puk, pwd)
 		if err != nil {
 			break
 		}
@@ -165,11 +198,27 @@ func SetCoinbase(index int) {
 /*
 	钱包中查找地址，判断地址是否属于本钱包
 */
-func FindAddress(addr crypto.AddressCoin) (ok bool) {
+func FindAddress(addr crypto.AddressCoin) (addrInfo AddressInfo, ok bool) {
 	ok = false
 	keystore.lock.RLock()
 	for _, one := range keystore.Wallets {
-		ok = one.FindAddress(addr)
+		addrInfo, ok = one.FindAddress(addr)
+		if ok {
+			break
+		}
+	}
+	keystore.lock.RUnlock()
+	return
+}
+
+/*
+	钱包中查找公钥是否存在
+*/
+func FindPuk(puk []byte) (addrInfo AddressInfo, ok bool) {
+	ok = false
+	keystore.lock.RLock()
+	for _, one := range keystore.Wallets {
+		addrInfo, ok = one.FindPuk(puk)
 		if ok {
 			break
 		}
@@ -182,6 +231,9 @@ func FindAddress(addr crypto.AddressCoin) (ok bool) {
 	签名
 */
 func Sign(prk ed25519.PrivateKey, content []byte) []byte {
+	if len(prk) == 0 {
+		return nil
+	}
 	return ed25519.Sign(prk, content)
 }
 

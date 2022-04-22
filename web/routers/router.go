@@ -22,7 +22,7 @@ func Router(rootpath string, c beego.ControllerInterface, mappingMethods ...stri
 }
 
 func Start() {
-	Router("/", &store.Index{}, "get:Index") //云存储首页
+	Router("/", &controllers.MainController{}, "get:Test") //云存储首页
 	// Router("/", &wallet.Index{}, "get:Index")   //首页
 	// Router("/", &sharebox.Index{}, "get:Index") //首页
 
@@ -42,8 +42,6 @@ func Start() {
 
 //云存储模块
 func RegisterStore() {
-	//
-
 	Router("/store/getlist", &store.Index{}, "get:GetList")            //获取文件列表
 	Router("/store/addfile", &store.Index{}, "post:AddFile")           //添加一个文件
 	Router("/store/addcryptfile", &store.Index{}, "post:AddCryptFile") //添加一个加密文件
@@ -68,7 +66,10 @@ func RegisterSharebox() {
 }
 
 func RegisterWallet() {
-	Router("/self/wallet", &wallet.Index{}, "get:Index") //钱包首页
+	// Router("/self/wallet", &wallet.Index{}, "get:Index")        //钱包首页
+	Router("/self/getinfo", &wallet.Index{}, "post:Getinfo")            //获取节点信息
+	Router("/self/block", &wallet.Index{}, "post:Block")                //获取区块头及交易
+	Router("/self/witnesslist", &wallet.Index{}, "post:GetWitnessList") //获取见证人列表
 }
 func RegisterRpc() {
 	Router("/rpc", &rpc.Bind{}, "post:Index") //rpc调用

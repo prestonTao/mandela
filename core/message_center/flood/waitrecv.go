@@ -1,8 +1,10 @@
 package flood
 
 import (
+	"mandela/config"
 	"sync"
 	"time"
+	// "github.com/antlabs/timer"
 )
 
 const waitRequstTime = 30 //超时时间设置为60秒
@@ -18,12 +20,13 @@ type HttpRequestWait struct {
 /*
 	等待请求返回
 */
-func WaitRequest(class, tag string, timeout int64) *[]byte {
+func WaitRequest(class, tag string, timeout int64) (*[]byte, error) {
 	if timeout <= 0 {
 		timeout = waitRequstTime
 	}
 
 	// fmt.Println("1111111111111", class, tag)
+	// engine.Log.Info("WaitRequest %s %s", class, tag)
 	rwItr, ok := waitRequest.Load(class) //[class]
 	if !ok {
 		c := make(chan *[]byte, 1)
@@ -33,14 +36,15 @@ func WaitRequest(class, tag string, timeout int64) *[]byte {
 		hrw.tagMap.Store(tag, c)       //[tag] = c
 		waitRequest.Store(class, &hrw) //[class] = &hrw
 		ticker := time.NewTicker(time.Second * time.Duration(timeout))
+		// timer.NewTimer().
 
 		select {
 		case <-ticker.C:
 			hrw.tagMap.Delete(tag)
-			return nil
+			return nil, config.ERROR_wait_msg_timeout
 		case bs := <-c:
 			ticker.Stop()
-			return bs
+			return bs, nil
 		}
 
 	}
@@ -54,10 +58,10 @@ func WaitRequest(class, tag string, timeout int64) *[]byte {
 		select {
 		case <-ticker.C:
 			rw.tagMap.Delete(tag)
-			return nil
+			return nil, config.ERROR_wait_msg_timeout
 		case bs := <-c:
 			ticker.Stop()
-			return bs
+			return bs, nil
 		}
 	}
 	c := cItr.(chan *[]byte)
@@ -66,10 +70,10 @@ func WaitRequest(class, tag string, timeout int64) *[]byte {
 	select {
 	case <-ticker.C:
 		rw.tagMap.Delete(tag)
-		return nil
+		return nil, config.ERROR_wait_msg_timeout
 	case bs := <-c:
 		ticker.Stop()
-		return bs
+		return bs, nil
 	}
 }
 
@@ -78,6 +82,7 @@ func WaitRequest(class, tag string, timeout int64) *[]byte {
 */
 func ResponseWait(class, tag string, bs *[]byte) {
 	// fmt.Println("ResponseWait", class, tag)
+	// engine.Log.Info("ResponseWait %s %s", class, tag)
 	rwItr, ok := waitRequest.Load(class) // [class]
 	if !ok {
 		return

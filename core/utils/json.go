@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"encoding/json"
 )
 
 /*

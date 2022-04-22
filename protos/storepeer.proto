@@ -1,0 +1,18 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+message StorePeer {
+    bytes        AddrNet      = 1 ; //存储节点
+    uint64       SpaceNum     = 2 ; //存储空间单位个数
+    bytes        AddrCoin     = 3 ; //收款地址
+    int64        FlashTime    = 4 ; //刷新时间
+}
+

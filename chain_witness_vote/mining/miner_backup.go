@@ -7,7 +7,6 @@ package mining
 import (
 	"mandela/core/utils"
 	"bytes"
-	"encoding/json"
 	"sync"
 )
 
@@ -30,28 +29,29 @@ type BackupMiner struct {
 	Count uint64          //票数
 }
 
-func (this *BackupMiners) JSON() *[]byte {
-	bs, err := json.Marshal(this)
-	if err != nil {
-		return nil
-	}
-	return &bs
-}
+// func (this *BackupMiners) JSON() *[]byte {
+// 	bs, err := json.Marshal(this)
+// 	if err != nil {
+// 		return nil
+// 	}
+// 	return &bs
+// }
 
 /*
 	解析预备矿工
 */
-func ParseBackupMiners(bs *[]byte) (*BackupMiners, error) {
-	bh := new(BackupMiners)
-	decoder := json.NewDecoder(bytes.NewBuffer(*bs))
-	decoder.UseNumber()
-	err := decoder.Decode(bh)
-	// err := json.Unmarshal(*bs, bh)
-	if err != nil {
-		return nil, err
-	}
-	return bh, nil
-}
+// func ParseBackupMiners(bs *[]byte) (*BackupMiners, error) {
+// 	bh := new(BackupMiners)
+// 	// var jso = jsoniter.ConfigCompatibleWithStandardLibrary
+// 	// err := json.Unmarshal(*bs, bh)
+// 	decoder := json.NewDecoder(bytes.NewBuffer(*bs))
+// 	decoder.UseNumber()
+// 	err := decoder.Decode(bh)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return bh, nil
+// }
 
 /*
 	预备矿工组
@@ -67,7 +67,7 @@ func AddGroupBackupMiner(miners ...*utils.Multihash) {
 	for _, one := range miners {
 		find := false
 		for _, two := range groupMiners {
-			if one.B58String() == two.B58String() {
+			if bytes.Equal(*one, two) {
 				find = true
 				break
 			}
@@ -98,7 +98,7 @@ func RemoveGroupBackupMiner(miners ...utils.Multihash) {
 	for _, one := range groupMiners {
 		find := false
 		for _, two := range miners {
-			if one.B58String() == two.B58String() {
+			if bytes.Equal(one, two) {
 				find = true
 				break
 			}

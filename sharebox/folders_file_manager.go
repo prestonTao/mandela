@@ -7,14 +7,16 @@ package sharebox
 import (
 	sqldb "mandela/sqlite3_db"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"os"
 
 	"io/ioutil"
 	"path/filepath"
 	"sync"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var rootDir = new(Dir)        //保存根目录
 var fileHashs = new(sync.Map) //key:string=文件hash;value:File=文件信息;

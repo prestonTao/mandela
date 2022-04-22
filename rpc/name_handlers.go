@@ -7,14 +7,18 @@ import (
 	"mandela/chain_witness_vote/mining/tx_name_out"
 	"mandela/config"
 	"mandela/core/nodeStore"
+	"mandela/core/utils"
 	"mandela/core/utils/crypto"
 	"mandela/rpc/model"
-	"mandela/store"
 	"bytes"
-	"encoding/json"
+	"encoding/hex"
 	"net/http"
 	"strings"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	域名注册，修改，续期
@@ -56,6 +60,12 @@ func NameIn(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []by
 		return
 	}
 	gas := uint64(gasItr.(float64))
+
+	frozenHeight := uint64(0)
+	frozenHeightItr, ok := rj.Get("frozen_height")
+	if ok {
+		frozenHeight = uint64(frozenHeightItr.(float64))
+	}
 
 	pwdItr, ok := rj.Get("pwd") //支付密码
 	if !ok {
@@ -104,9 +114,25 @@ func NameIn(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []by
 		}
 	}
 
-	err = tx_name_in.NameIn(addr, amount, gas, pwd, name, ids, coins)
+	comment := ""
+	commentItr, ok := rj.Get("comment")
+	if ok && rj.VerifyType("comment", "string") {
+		comment = commentItr.(string)
+	}
+
+	txpay, err := tx_name_in.NameIn(nil, addr, amount, gas, frozenHeight, pwd, comment, name, ids, coins)
 	if err == nil {
-		res, err = model.Tojson("success")
+		// res, err = model.Tojson("success")
+
+		result, e := utils.ChangeMap(txpay)
+		if e != nil {
+			res, err = model.Errcode(model.Nomarl, err.Error())
+			return
+		}
+		result["hash"] = hex.EncodeToString(*txpay.GetHash())
+
+		res, err = model.Tojson(result)
+
 		return
 	}
 	if err.Error() == config.ERROR_password_fail.Error() {
@@ -122,6 +148,7 @@ func NameIn(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []by
 		return
 	}
 	res, err = model.Errcode(model.Nomarl, err.Error())
+
 	return
 }
 
@@ -156,6 +183,12 @@ func NameOut(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []b
 	}
 	gas := uint64(gasItr.(float64))
 
+	frozenHeight := uint64(0)
+	frozenHeightItr, ok := rj.Get("frozen_height")
+	if ok {
+		frozenHeight = uint64(frozenHeightItr.(float64))
+	}
+
 	pwdItr, ok := rj.Get("pwd") //支付密码
 	if !ok {
 		res, err = model.Errcode(5002, "pwd")
@@ -179,9 +212,25 @@ func NameOut(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []b
 		return
 	}
 
-	err = tx_name_out.NameOut(addr, 0, gas, pwd, name)
+	comment := ""
+	commentItr, ok := rj.Get("comment")
+	if ok && rj.VerifyType("comment", "string") {
+		comment = commentItr.(string)
+	}
+
+	txpay, err := tx_name_out.NameOut(nil, addr, 0, gas, frozenHeight, pwd, comment, name)
 	if err == nil {
-		res, err = model.Tojson("success")
+		// res, err = model.Tojson("success")
+
+		result, e := utils.ChangeMap(txpay)
+		if e != nil {
+			res, err = model.Errcode(model.Nomarl, err.Error())
+			return
+		}
+		result["hash"] = hex.EncodeToString(*txpay.GetHash())
+
+		res, err = model.Tojson(result)
+
 		return
 	}
 	if err.Error() == config.ERROR_password_fail.Error() {
@@ -259,7 +308,7 @@ func FindName(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []
 	}
 	bs, err := json.Marshal(nameinfo)
 	if err != nil {
-		res, err = model.Errcode(model.Nomarl, "查询到的域名格式化失败1")
+		res, err = model.Errcode(model.Nomarl, "find name formate failt 1")
 		return
 	}
 	result := make(map[string]interface{})
@@ -268,10 +317,10 @@ func FindName(rj *model.RpcJson, w http.ResponseWriter, r *http.Request) (res []
 	decoder.UseNumber()
 	err = decoder.Decode(&result)
 	if err != nil {
-		res, err = model.Errcode(model.Nomarl, "查询到的域名格式化失败2")
+		res, err = model.Errcode(model.Nomarl, "find name formate failt 2")
 		return
 	}
-	result["DepositMin"] = store.DepositMin
+	// result["DepositMin"] = store.DepositMin
 
 	res, err = model.Tojson(result)
 	return

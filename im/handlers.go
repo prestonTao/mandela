@@ -10,7 +10,6 @@ import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/sqlite3_db"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,7 +113,8 @@ func FileMsg(c engine.Controller, msg engine.Packet, message *message_center.Mes
 	接收发送的图文消息  返回
 */
 func FileMsg_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
-	flood.ResponseWait(config.CLASS_im_file_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(config.CLASS_im_file_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(config.CLASS_im_file_msg, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }
 
 /*
@@ -132,7 +132,8 @@ func PropertyMsg(c engine.Controller, msg engine.Packet, message *message_center
 	接收用户属性消息  返回
 */
 func PropertyMsg_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
-	flood.ResponseWait(config.CLASS_im_property_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(config.CLASS_im_property_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(config.CLASS_im_property_msg, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }
 
 /*
@@ -140,7 +141,7 @@ func PropertyMsg_recv(c engine.Controller, msg engine.Packet, message *message_c
 */
 func BaseCoinAddrMsg(c engine.Controller, msg engine.Packet, message *message_center.Message) {
 	//获取收款地址
-	addr := []byte(keystore.GetCoinbase())
+	addr := []byte(keystore.GetCoinbase().Addr)
 	message_center.SendP2pReplyMsgHE(message, config.MSGID_im_addr_recv, &addr)
 }
 
@@ -148,7 +149,8 @@ func BaseCoinAddrMsg(c engine.Controller, msg engine.Packet, message *message_ce
 	获取用户收款地址消息  返回
 */
 func BaseCoinAddrMsg_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
-	flood.ResponseWait(config.CLASS_im_addr_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(config.CLASS_im_addr_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(config.CLASS_im_addr_msg, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }
 
 /*
@@ -186,5 +188,6 @@ func PayMsg(c engine.Controller, msg engine.Packet, message *message_center.Mess
 	文本消息  返回
 */
 func PayMsg_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
-	flood.ResponseWait(config.CLASS_im_pay_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(config.CLASS_im_pay_msg, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(config.CLASS_im_pay_msg, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }

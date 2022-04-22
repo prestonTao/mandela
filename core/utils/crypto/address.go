@@ -34,10 +34,15 @@ func AddressFromB58String(str string) AddressCoin {
 	preStr := str[:preLen]
 	preByte := []byte(preStr)
 	centerByte := base58.Decode(str[preLen : len(str)-1])
-	buf := bytes.NewBuffer(preByte)
-	buf.Write(centerByte)
-	buf.Write(lastByte)
-	return AddressCoin(buf.Bytes())
+	bs := make([]byte, 0, len(preByte)+len(centerByte)+len(lastByte))
+	bs = append(bs, preByte...)
+	bs = append(bs, centerByte...)
+	bs = append(bs, lastByte...)
+	return AddressCoin(bs)
+	// buf := bytes.NewBuffer(preByte)
+	// buf.Write(centerByte)
+	// buf.Write(lastByte)
+	// return AddressCoin(buf.Bytes())
 
 	//	return AddressCoin(base58.Decode(str))
 }
@@ -63,14 +68,21 @@ func BuildAddr(pre string, pubKey []byte) AddressCoin {
 	//第五步，再次计算上一步结果的SHA-256哈希值
 	temp = sha256.Sum256(temp[:])
 	//第六步，取上一步结果的前4个字节（8位十六进制数）D61967F6，把这4个字节加在第三步结果的后面，作为校验
-
-	buf = bytes.NewBuffer([]byte(pre))
-	buf.Write(publicRIPEMD160)
-	buf.Write(temp[:4])
+	bs := make([]byte, 0, len(pre)+len(publicRIPEMD160)+4+1)
+	bs = append(bs, pre...)
+	bs = append(bs, publicRIPEMD160...)
+	bs = append(bs, temp[:4]...)
 	preLen := len([]byte(pre))
-	buf.WriteByte(byte(preLen))
+	bs = append(bs, byte(preLen))
+	return bs
 
-	return buf.Bytes()
+	// buf = bytes.NewBuffer([]byte(pre))
+	// buf.Write(publicRIPEMD160)
+	// buf.Write(temp[:4])
+	// preLen := len([]byte(pre))
+	// buf.WriteByte(byte(preLen))
+
+	// return buf.Bytes()
 
 }
 

@@ -6,29 +6,37 @@ import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/core/virtual_node"
+	"mandela/protos/go_protos"
 	"bytes"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/gogo/protobuf/proto"
 )
+
+const MsgCacheTimeOver = 60 * 60 * 24
+
+// const msgHashCacheTime = msgHashCacheTime //
 
 var sendHash = new(sync.Map) //保存1分钟内的消息sendhash，用于判断重复消息
 var sendhashTask = utils.NewTask(sendhashTaskFun)
 
 func sendhashTaskFun(class string, params []byte) {
-	sendHash.Delete(hex.EncodeToString(params))
+	// sendHash.Delete(hex.EncodeToString(params))
+	sendHash.Delete(utils.Bytes2string(params))
 }
 
 /*
 	检查这个消息是否发送过
 */
 func CheckHash(sendhash []byte) bool {
-	_, ok := sendHash.Load(hex.EncodeToString(sendhash))
+	// _, ok := sendHash.Load(hex.EncodeToString(sendhash))
+	_, ok := sendHash.Load(utils.Bytes2string(sendhash))
 	if !ok {
-		sendHash.Store(hex.EncodeToString(sendhash), nil)
-		sendhashTask.Add(time.Now().Unix()+60, "", sendhash)
+		// sendHash.Store(hex.EncodeToString(sendhash), nil)
+		sendHash.Store(utils.Bytes2string(sendhash), nil)
+		sendhashTask.Add(time.Now().Unix()+MsgCacheTimeOver, "", sendhash)
 	}
 	return !ok
 }
@@ -142,16 +150,55 @@ func (this *MessageHead) Check() bool {
 	return true
 }
 
-func (this *MessageHead) JSON() *[]byte {
-	//	this.BuildReplyHash()
-	bs, _ := json.Marshal(this)
-	return &bs
+// func (this *MessageHead) JSON() *[]byte {
+// 	//	this.BuildReplyHash()
+// 	bs, _ := json.Marshal(this)
+// 	return &bs
+// }
+
+func (this *MessageHead) Proto() []byte {
+	mhp := new(go_protos.MessageHead)
+	mhp.Accurate = this.Accurate
+	if this.RecvId != nil {
+		mhp.RecvId = *this.RecvId
+	}
+
+	if this.RecvSuperId != nil {
+		mhp.RecvSuperId = *this.RecvSuperId
+	}
+
+	if this.RecvVnode != nil {
+		mhp.RecvVnode = *this.RecvVnode
+	}
+
+	if this.Sender != nil {
+		mhp.Sender = *this.Sender
+	}
+
+	if this.SenderSuperId != nil {
+		mhp.SenderSuperId = *this.SenderSuperId
+	}
+
+	if this.SenderVnode != nil {
+		mhp.SenderVnode = *this.SenderVnode
+	}
+	// mhp := go_protos.MessageHead{
+	// 	RecvId:        this.RecvId,
+	// 	RecvSuperId:   this.RecvSuperId,
+	// 	RecvVnode:     this.RecvVnode,
+	// 	Sender:        this.Sender,
+	// 	SenderSuperId: this.SenderSuperId,
+	// 	SenderVnode:   this.SenderVnode,
+	// 	Accurate:      this.Accurate,
+	// }
+	bs, _ := mhp.Marshal()
+	return bs
 }
 
 type MessageBody struct {
 	MessageId  uint64  `json:"m_id"`    //消息协议编号
-	CreateTime string  `json:"c_time"`  //消息创建时间unix
-	ReplyTime  string  `json:"r_time"`  //消息回复时间unix
+	CreateTime uint64  `json:"c_time"`  //消息创建时间unix
+	ReplyTime  uint64  `json:"r_time"`  //消息回复时间unix
 	Hash       []byte  `json:"hash"`    //消息的hash值
 	ReplyHash  []byte  `json:"r_hash"`  //回复消息的hash
 	SendRand   uint64  `json:"s_rand"`  //发送随机数
@@ -159,7 +206,7 @@ type MessageBody struct {
 	Content    *[]byte `json:"content"` //发送的内容
 }
 
-func NewMessageBody(msgid uint64, content *[]byte, creatTime string, hash []byte, sendRand uint64) *MessageBody {
+func NewMessageBody(msgid uint64, content *[]byte, creatTime uint64, hash []byte, sendRand uint64) *MessageBody {
 	return &MessageBody{
 		MessageId:  msgid,
 		CreateTime: creatTime,
@@ -169,10 +216,34 @@ func NewMessageBody(msgid uint64, content *[]byte, creatTime string, hash []byte
 	}
 }
 
-func (this *MessageBody) JSON() *[]byte {
-	//	this.BuildReplyHash()
-	bs, _ := json.Marshal(this)
-	return &bs
+// func (this *MessageBody) JSON() *[]byte {
+// 	//	this.BuildReplyHash()
+// 	bs, _ := json.Marshal(this)
+// 	return &bs
+// }
+
+func (this *MessageBody) Proto() []byte {
+	mbp := go_protos.MessageBody{
+		MessageId:  this.MessageId,
+		CreateTime: this.CreateTime,
+		ReplyTime:  this.ReplyTime,
+		Hash:       this.Hash,
+		ReplyHash:  this.ReplyHash,
+		SendRand:   this.SendRand,
+		RecvRand:   this.RecvRand,
+		// Content:    *this.Content,
+	}
+	// if this.Hash != nil {
+	// mbp.Hash = *this.Hash
+	// }
+	// if this.ReplyHash != nil {
+	// mbp.ReplyHash = *this.ReplyHash
+	// }
+	if this.Content != nil {
+		mbp.Content = *this.Content
+	}
+	bs, _ := mbp.Marshal()
+	return bs
 }
 
 /*
@@ -199,14 +270,72 @@ type Message struct {
 //	Rand          uint64           `json:"rand"`            //随机数
 //}
 
+func (this *Message) Proto() ([]byte, error) {
+	head := go_protos.MessageHead{
+		// RecvId:        *this.Head.RecvId,
+		// RecvSuperId:   this.Head.RecvSuperId,
+		// RecvVnode:     this.Head.RecvVnode,
+		// Sender:        this.Head.Sender,
+		// SenderSuperId: this.Head.SenderSuperId,
+		// SenderVnode:   this.Head.SenderVnode,
+		Accurate: this.Head.Accurate,
+	}
+	if this.Head.RecvId != nil {
+		head.RecvId = *this.Head.RecvId
+	}
+	if this.Head.RecvSuperId != nil {
+		head.RecvSuperId = *this.Head.RecvSuperId
+	}
+	if this.Head.RecvVnode != nil {
+		head.RecvVnode = *this.Head.RecvVnode
+	}
+	if this.Head.Sender != nil {
+		head.Sender = *this.Head.Sender
+	}
+	if this.Head.SenderSuperId != nil {
+		head.SenderSuperId = *this.Head.SenderSuperId
+	}
+	if this.Head.SenderVnode != nil {
+		head.SenderVnode = *this.Head.SenderVnode
+	}
+	body := go_protos.MessageBody{
+		MessageId:  this.Body.MessageId,
+		CreateTime: this.Body.CreateTime,
+		ReplyTime:  this.Body.ReplyTime,
+		Hash:       this.Body.Hash,
+		ReplyHash:  this.Body.ReplyHash,
+		SendRand:   this.Body.SendRand,
+		RecvRand:   this.Body.RecvRand,
+		// Content:    this.Body.Content,
+	}
+	// if this.Body.Hash != nil {
+	// 	body.Hash = *this.Body.Hash
+	// }
+	// if this.Body.ReplyHash != nil {
+	// 	body.ReplyHash = *this.Body.ReplyHash
+	// }
+	if this.Body.Content != nil {
+		body.Content = *this.Body.Content
+	}
+	message := go_protos.Message{
+		Head: &head,
+		Body: &body,
+		// DataPlus: this.DataPlus,
+	}
+	if this.DataPlus != nil {
+		message.DataPlus = *this.DataPlus
+	}
+	return message.Marshal()
+}
 func (this *Message) BuildHash() {
 	this.Body.ReplyHash = nil
 	this.Body.Hash = nil
 	this.Body.SendRand = utils.GetAccNumber()
 	this.Body.RecvRand = 0
-	this.Body.CreateTime = utils.TimeFormatToNanosecond()
-	bs, _ := json.Marshal(this)
-
+	// this.Body.CreateTime = utils.TimeFormatToNanosecond()
+	// bs, _ := json.Marshal(this)
+	this.Body.CreateTime = uint64(time.Now().Unix()) // utils.TimeFormatToNanosecond()
+	bs, _ := this.Proto()                            // json.Marshal(this)
 	// hash := sha1.New()
 	// hash.Write(bs)
 	// mhBs, _ := utils.Encode(utils.Hash_SHA3_256(bs), gconfig.HashCode)
@@ -215,14 +344,17 @@ func (this *Message) BuildHash() {
 	this.Body.Hash = utils.Hash_SHA3_256(bs)
 	//	this.Hash = hex.EncodeToString(hash.Sum(nil))
 }
-func (this *Message) BuildReplyHash(createtime string, sendhash []byte, sendrand uint64) {
+func (this *Message) BuildReplyHash(createtime uint64, sendhash []byte, sendrand uint64) {
 	this.Body.CreateTime = createtime
 	this.Body.Hash = sendhash
 	this.Body.SendRand = sendrand
 	this.Body.ReplyHash = nil
+	// this.Body.RecvRand = utils.GetAccNumber()
+	// this.Body.ReplyTime = utils.TimeFormatToNanosecond()
+	// bs, _ := json.Marshal(this)
 	this.Body.RecvRand = utils.GetAccNumber()
-	this.Body.ReplyTime = utils.TimeFormatToNanosecond()
-	bs, _ := json.Marshal(this)
+	this.Body.ReplyTime = uint64(time.Now().Unix()) //utils.TimeFormatToNanosecond()
+	bs, _ := this.Proto()                           // json.Marshal(this)
 	// hash := sha1.New()
 	// hash.Write(bs)
 	// mhBs, _ := utils.Encode(utils.Hash_SHA3_256(bs), gconfig.HashCode)
@@ -303,13 +435,19 @@ func (this *Message) sendNormal(version uint64) bool {
 		// 	fmt.Println("-=-=- 333333333333333")
 		// }
 		//查找代理节点
-		if _, ok := nodeStore.GetProxyNode(this.Head.RecvId.B58String()); ok {
+		// if _, ok := nodeStore.GetProxyNode(this.Head.RecvId.B58String()); ok {
+		if _, ok := nodeStore.GetProxyNode(utils.Bytes2string(*this.Head.RecvId)); ok {
 			//发送给代理节点
-			if session, ok := engine.GetSession(this.Head.RecvId.B58String()); ok {
+			// if session, ok := engine.GetSession(this.Head.RecvId.B58String()); ok {
+			if session, ok := engine.GetSession(utils.Bytes2string(*this.Head.RecvId)); ok {
 				// if version == debuf_msgid {
 				// 	fmt.Println("-=-=- 4444444444444")
 				// }
-				session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+				// session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+
+				mheadBs := this.Head.Proto()
+				mbodyBs := this.Body.Proto()
+				session.Send(version, &mheadBs, &mbodyBs, false)
 			} else {
 				// fmt.Println("这个代理节点的链接断开了")
 			}
@@ -348,8 +486,13 @@ func (this *Message) sendNormal(version uint64) bool {
 		// }
 
 		//转发出去
-		if session, ok := engine.GetSession(targetId.B58String()); ok {
-			session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+		// if session, ok := engine.GetSession(targetId.B58String()); ok {
+		if session, ok := engine.GetSession(utils.Bytes2string(*targetId)); ok {
+			// session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+
+			mheadBs := this.Head.Proto()
+			mbodyBs := this.Body.Proto()
+			session.Send(version, &mheadBs, &mbodyBs, false)
 			// if version == debuf_msgid {
 			// 	fmt.Println("-=-=- 999999999999")
 			// }
@@ -370,8 +513,13 @@ func (this *Message) sendNormal(version uint64) bool {
 			// fmt.Println("没有可用的超级节点")
 			return true
 		}
-		if session, ok := engine.GetSession(nodeStore.SuperPeerId.B58String()); ok {
-			session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+		// if session, ok := engine.GetSession(nodeStore.SuperPeerId.B58String()); ok {
+		if session, ok := engine.GetSession(utils.Bytes2string(*nodeStore.SuperPeerId)); ok {
+			// session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+			mheadBs := this.Head.Proto()
+			mbodyBs := this.Body.Proto()
+			session.Send(version, &mheadBs, &mbodyBs, false)
+			// session.Send(version, this.Head.Proto(), this.Body.Proto(), false)
 		} else {
 			// fmt.Println("超级节点的session未找到")
 		}
@@ -485,14 +633,34 @@ func (this *Message) sendNormal(version uint64) bool {
 	不是自己的则自动转发出去
 */
 func (this *Message) IsSendOther(form *nodeStore.AddressNet) bool {
-	engine.Log.Info("打印消息1 %v", this.Body)
+	// engine.Log.Info("打印消息1 %+v", this.Head)
+	// if this.Head.Sender != nil {
+	// 	engine.Log.Info("打印消息2 %+v", this.Head.Sender.B58String())
+	// }
+	// if this.Head.SenderSuperId != nil {
+	// 	engine.Log.Info("打印消息3 %+v", this.Head.SenderSuperId.B58String())
+	// }
+	// if this.Head.SenderVnode != nil {
+	// 	engine.Log.Info("打印消息4 %+v", this.Head.SenderVnode.B58String())
+	// }
+	// if this.Head.RecvId != nil {
+	// 	engine.Log.Info("打印消息5 %+v", this.Head.RecvId.B58String())
+	// }
+	// if this.Head.RecvSuperId != nil {
+	// 	engine.Log.Info("打印消息6 %+v", this.Head.RecvSuperId.B58String())
+	// }
+	// if this.Head.RecvVnode != nil {
+	// 	engine.Log.Info("打印消息7 %+v", this.Head.RecvVnode.B58String())
+	// }
+	// engine.Log.Info("打印消息8 %+v", this.Body)
+
 	//如果是虚拟节点之间的消息，则一定是指定某节点的
 	// oldAccurate := this.Head.Accurate
 	// if this.Head.SenderVnode != nil && this.Head.RecvVnode != nil {
 	// 	this.Head.Accurate = true
 	// }
 	ok := IsSendToOtherSuperToo(this.Head, this.DataPlus, this.msgid, form)
-	engine.Log.Info("打印消息2 %v", this.Body)
+	// engine.Log.Info("打印消息2 %v", this.Body)
 	//将messageHead.Accurate参数恢复
 	// messageHead.Accurate = oldAccurate
 
@@ -520,7 +688,7 @@ func (this *Message) IsSendOther(form *nodeStore.AddressNet) bool {
 		if targetId == nil {
 			return true
 		}
-		engine.Log.Info("打印消息3 %v", this.Body)
+		// engine.Log.Info("打印消息3 %v", this.Body)
 		vnodeinfo := virtual_node.FindVnodeinfo(targetId)
 		this.Head.RecvId = &vnodeinfo.Nid
 		this.Head.RecvSuperId = &vnodeinfo.Nid
@@ -529,10 +697,10 @@ func (this *Message) IsSendOther(form *nodeStore.AddressNet) bool {
 			SendVnodeP2pMsgHE(this.Body.MessageId, this.Head.SenderVnode, this.Head.RecvVnode, nil)
 		} else {
 
-			fmt.Println(this.Body.MessageId)
-			fmt.Println(this.Head.SenderVnode)
-			fmt.Println(this.Head.RecvVnode)
-			fmt.Println(this.DataPlus)
+			// fmt.Println(this.Body.MessageId)
+			// fmt.Println(this.Head.SenderVnode)
+			// fmt.Println(this.Head.RecvVnode)
+			// fmt.Println(this.DataPlus)
 			SendVnodeP2pMsgHE(this.Body.MessageId, this.Head.SenderVnode, this.Head.RecvVnode, this.DataPlus)
 		}
 		return true
@@ -543,19 +711,19 @@ func (this *Message) IsSendOther(form *nodeStore.AddressNet) bool {
 /*
 	解析内容
 */
-func (this *Message) ParserContent() error {
-	//TODO 解密内容
+// func (this *Message) ParserContent() error {
+// 	//TODO 解密内容
 
-	this.Body = new(MessageBody)
-	// err := json.Unmarshal(*this.DataPlus, this.Body)
-	decoder := json.NewDecoder(bytes.NewBuffer(*this.DataPlus))
-	decoder.UseNumber()
-	err := decoder.Decode(this.Body)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+// 	this.Body = new(MessageBody)
+// 	// err := json.Unmarshal(*this.DataPlus, this.Body)
+// 	decoder := json.NewDecoder(bytes.NewBuffer(*this.DataPlus))
+// 	decoder.UseNumber()
+// 	err := decoder.Decode(this.Body)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 /*
 	验证hash
@@ -566,6 +734,42 @@ func (this *Message) CheckSendhash() bool {
 
 	//验证sendhash是否已经接受过此消息
 	return CheckHash(this.Body.Hash)
+}
+
+/*
+	解析内容
+*/
+func (this *Message) ParserContentProto() error {
+	if this.DataPlus == nil {
+		return nil
+	}
+	mbp := new(go_protos.MessageBody)
+	err := proto.Unmarshal(*this.DataPlus, mbp)
+	if err != nil {
+		return err
+	}
+	this.Body = &MessageBody{
+		MessageId:  mbp.MessageId,
+		CreateTime: mbp.CreateTime,
+		ReplyTime:  mbp.ReplyTime,
+		Hash:       mbp.Hash,
+		ReplyHash:  mbp.ReplyHash,
+		SendRand:   mbp.SendRand,
+		RecvRand:   mbp.RecvRand,
+		// Content:    mbp.Content,
+	}
+	if mbp.Content != nil && len(mbp.Content) > 0 {
+		this.Body.Content = &mbp.Content
+	}
+
+	// err := json.Unmarshal(*this.DataPlus, this.Body)
+	// decoder := json.NewDecoder(bytes.NewBuffer(*this.DataPlus))
+	// decoder.UseNumber()
+	// err := decoder.Decode(this.Body)
+	// if err != nil {
+	// 	return err
+	// }
+	return nil
 }
 
 /*
@@ -588,14 +792,20 @@ func (this *Message) Reply(version uint64) bool {
 	//TODO 这里对消息加密
 
 	if nodeStore.NodeSelf.IsSuper {
-		return IsSendToOtherSuperToo(this.Head, this.Body.JSON(), version, nil)
+		// return IsSendToOtherSuperToo(this.Head, this.Body.JSON(), version, nil)
+		mbodyBs := this.Body.Proto()
+		return IsSendToOtherSuperToo(this.Head, &mbodyBs, version, nil)
 	} else {
 		if nodeStore.SuperPeerId == nil {
 			// fmt.Println("没有可用的超级节点")
 			return true
 		}
-		if session, ok := engine.GetSession(nodeStore.SuperPeerId.B58String()); ok {
-			session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+		// if session, ok := engine.GetSession(nodeStore.SuperPeerId.B58String()); ok {
+		if session, ok := engine.GetSession(utils.Bytes2string(*nodeStore.SuperPeerId)); ok {
+			// session.Send(version, this.Head.JSON(), this.Body.JSON(), false)
+			mheadBs := this.Head.Proto()
+			mbodyBs := this.Body.Proto()
+			session.Send(version, &mheadBs, &mbodyBs, false)
 		} else {
 			// fmt.Println("超级节点的session未找到")
 		}
@@ -610,20 +820,70 @@ func NewMessage(head *MessageHead, body *MessageBody) *Message {
 	}
 }
 
-func ParserMessage(data, dataplus *[]byte, msgId uint64) (*Message, error) {
-	head := new(MessageHead)
-	// err := json.Unmarshal(*data, head)
-	decoder := json.NewDecoder(bytes.NewBuffer(*data))
-	decoder.UseNumber()
-	err := decoder.Decode(head)
+// func ParserMessage(data, dataplus *[]byte, msgId uint64) (*Message, error) {
+// 	head := new(MessageHead)
+// 	// err := json.Unmarshal(*data, head)
+// 	decoder := json.NewDecoder(bytes.NewBuffer(*data))
+// 	decoder.UseNumber()
+// 	err := decoder.Decode(head)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	msg := Message{
+// 		msgid:    msgId,
+// 		Head:     head,
+// 		DataPlus: dataplus,
+// 	}
+// 	return &msg, nil
+// }
+
+func ParserMessageProto(data, dataplus []byte, msgId uint64) (*Message, error) {
+	mhp := new(go_protos.MessageHead)
+	err := proto.Unmarshal(data, mhp)
 	if err != nil {
 		return nil, err
+	}
+
+	head := &MessageHead{
+		// RecvId:        nodeStore.AddressNet(mhp.RecvId),
+		// RecvSuperId:   nodeStore.AddressNet(mhp.RecvSuperId),
+		// RecvVnode:     virtual_node.AddressNetExtend(mhp.RecvVnode),
+		// Sender:        nodeStore.AddressNet(mhp.Sender),
+		// SenderSuperId: nodeStore.AddressNet(mhp.SenderSuperId),
+		// SenderVnode:   virtual_node.AddressNetExtend(mhp.SenderVnode),
+		Accurate: mhp.Accurate,
+	}
+
+	if mhp.RecvId != nil && len(mhp.RecvId) > 0 {
+		recvId := nodeStore.AddressNet(mhp.RecvId)
+		head.RecvId = &recvId
+	}
+	if mhp.RecvSuperId != nil && len(mhp.RecvSuperId) > 0 {
+		recvSuperId := nodeStore.AddressNet(mhp.RecvSuperId)
+		head.RecvSuperId = &recvSuperId
+	}
+	if mhp.RecvVnode != nil && len(mhp.RecvVnode) > 0 {
+		recvVnode := virtual_node.AddressNetExtend(mhp.RecvVnode)
+		head.RecvVnode = &recvVnode
+	}
+	if mhp.Sender != nil && len(mhp.Sender) > 0 {
+		sender := nodeStore.AddressNet(mhp.Sender)
+		head.Sender = &sender
+	}
+	if mhp.SenderSuperId != nil && len(mhp.SenderSuperId) > 0 {
+		senderSuperId := nodeStore.AddressNet(mhp.SenderSuperId)
+		head.SenderSuperId = &senderSuperId
+	}
+	if mhp.SenderVnode != nil && len(mhp.SenderVnode) > 0 {
+		senderVnode := virtual_node.AddressNetExtend(mhp.SenderVnode)
+		head.SenderVnode = &senderVnode
 	}
 
 	msg := Message{
 		msgid:    msgId,
 		Head:     head,
-		DataPlus: dataplus,
+		DataPlus: &dataplus,
 	}
 	return &msg, nil
 }
@@ -634,13 +894,13 @@ func ParserMessage(data, dataplus *[]byte, msgId uint64) (*Message, error) {
 //func GetHash(msg *Message) string {
 //	hash := sha256.New()
 //	hash.Write([]byte(msg.RecvId))
-//	//	binary.Write(hash, binary.BigEndian, uint64(msg.ProtoId))
-//	binary.Write(hash, binary.BigEndian, msg.CreateTime)
+//	//	binary.Write(hash, binary.LittleEndian, uint64(msg.ProtoId))
+//	binary.Write(hash, binary.LittleEndian, msg.CreateTime)
 //	// hash.Write([]byte(int64(msg.ProtoId)))
 //	// hash.Write([]byte(msg.CreateTime))
 //	hash.Write([]byte(msg.Sender))
 //	// hash.Write([]byte(msg.RecvTime))
-//	binary.Write(hash, binary.BigEndian, msg.ReplyTime)
+//	binary.Write(hash, binary.LittleEndian, msg.ReplyTime)
 //	hash.Write(msg.Content)
 //	hash.Write([]byte(msg.ReplyHash))
 //	return hex.EncodeToString(hash.Sum(nil))

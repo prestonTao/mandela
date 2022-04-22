@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/go-xorm/xorm"
-	_ "github.com/mattn/go-sqlite3"
+	// _ "github.com/mattn/go-sqlite3"
+	_ "github.com/logoove/sqlite"
 )
 
 const dbpath = "D:/test/hzzfiles/sqlkey10table.db"
@@ -257,7 +258,7 @@ func (this *Storage) fullTableOne(n int) {
 	}
 }
 
-func NewStorage(abspath string) *Storage {
+func NewStorage(abspath string, index uint64) *Storage {
 	var err error
 	engineDB, err = xorm.NewEngine("sqlite3", "file:"+abspath+"?cache=shared")
 	if err != nil {
@@ -311,6 +312,7 @@ func NewStorage(abspath string) *Storage {
 	s := &Storage{
 		sqldb:    engineDB,                //sql数据库保存leveldb数据库中的key。
 		DbPath:   abspath,                 //数据库目录
+		Index:    index,                   //
 		SpaceNum: 1024 * 1024 * 1024 * 10, //默认占用空间大小 单位byte
 		PerSpace: 512 * 1024,              //每块大小 单位byte
 		TableNum: 10,                      //分表数量

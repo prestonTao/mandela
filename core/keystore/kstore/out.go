@@ -1,7 +1,6 @@
 package kstore
 
 import (
-	"encoding/json"
 	"fmt"
 )
 

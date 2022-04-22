@@ -4,8 +4,11 @@ import (
 	"mandela/config"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
+	"mandela/protos/go_protos"
 	"bytes"
 	"sync"
+
+	"github.com/gogo/protobuf/proto"
 )
 
 /*
@@ -87,14 +90,14 @@ func (this *Vnode) AddLogicVnodeinfo(vnode Vnodeinfo) (ok bool) {
 
 	ok, removeIDs := idm.AddId(vnode.Vid)
 	if ok {
-		this.LogicalNode.Store(vnode.Vid.B58String(), vnode)
+		this.LogicalNode.Store(utils.Bytes2string(vnode.Vid), vnode)
 
 		//		fmt.Println("添加成功", new(big.Int).SetBytes(node.IdInfo.Id.Data()).Int64())
 
 		//删除被替换的id
 		for _, one := range removeIDs {
 			addrNetExtend := AddressNetExtend(one)
-			this.LogicalNode.Delete(addrNetExtend.B58String())
+			this.LogicalNode.Delete(utils.Bytes2string(addrNetExtend))
 		}
 	}
 	return true
@@ -128,18 +131,12 @@ func (this *Vnode) GetVnodeinfoAllNotSelf() []Vnodeinfo {
 	查找Vnodeinfo
 */
 func (this *Vnode) FindVnodeinfo(vid AddressNetExtend) *Vnodeinfo {
-	value, ok := this.LogicalNode.Load(vid.B58String())
+	value, ok := this.LogicalNode.Load(utils.Bytes2string(vid))
 	if ok {
 		vnodeinfo := value.(Vnodeinfo)
 		return &vnodeinfo
 	}
 	return nil
-
-	// vnodeinfo, ok := this.vnodesMap[vid.B58String()]
-	// if ok {
-	// 	return &vnodeinfo
-	// }
-	// return nil
 }
 
 func (this *Vnode) Test() {}
@@ -168,4 +165,49 @@ func NewVnode(index uint64, addrNet nodeStore.AddressNet, findNearVnodeChan chan
 type FindVnodeVO struct {
 	Self   Vnodeinfo //自己节点
 	Target Vnodeinfo //目标节点
+}
+
+func (this *FindVnodeVO) Proto() ([]byte, error) {
+	self := go_protos.Vnodeinfo{
+		Nid:   this.Self.Nid,
+		Index: this.Self.Index,
+		Vid:   this.Self.Vid,
+	}
+
+	target := go_protos.Vnodeinfo{
+		Nid:   this.Target.Nid,
+		Index: this.Target.Index,
+		Vid:   this.Target.Vid,
+	}
+
+	fvp := go_protos.FindVnodeVO{
+		Self:   &self,
+		Target: &target,
+	}
+	return fvp.Marshal()
+}
+
+func ParseFindVnodeVO(bs []byte) (*FindVnodeVO, error) {
+	fvp := new(go_protos.FindVnodeVO)
+	err := proto.Unmarshal(bs, fvp)
+	if err != nil {
+		return nil, err
+	}
+	self := Vnodeinfo{
+		Nid:   fvp.Self.Nid,
+		Index: fvp.Self.Index,
+		Vid:   fvp.Self.Vid,
+	}
+
+	target := Vnodeinfo{
+		Nid:   fvp.Target.Nid,
+		Index: fvp.Target.Index,
+		Vid:   fvp.Target.Vid,
+	}
+
+	fvVO := FindVnodeVO{
+		Self:   self,
+		Target: target,
+	}
+	return &fvVO, nil
 }

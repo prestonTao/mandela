@@ -7,7 +7,12 @@ import (
 	"mandela/config"
 	"mandela/core/engine"
 	"mandela/core/utils"
+	"errors"
 	"path/filepath"
+	"runtime"
+	"time"
+
+	"github.com/hyahm/golog"
 	// "crypto/ecdsa"
 )
 
@@ -16,8 +21,22 @@ import (
 // var coinbase *keystore.Address
 
 func Register() error {
+	golog.InitLogger("logs/randeHash.txt", 0, true)
+	golog.Infof("start %s", "log")
 
-	err := utils.StartOtherTime()
+	engine.Log.Info("CPUNUM :%d", config.CPUNUM)
+	// if config.CPUNUM < 8 {
+	// 	config.CPUNUM = 8
+	// }
+	go func() {
+		for {
+			engine.Log.Info("NumGoroutine:%d", runtime.NumGoroutine())
+			time.Sleep(time.Minute)
+			// log.Error(http.ListenAndServe(":6060", nil))
+		}
+	}()
+
+	err := utils.StartSystemTime() //StartOtherTime()
 	if err != nil {
 		return err
 	}
@@ -29,7 +48,7 @@ func Register() error {
 	utils.CheckCreateDir(filepath.Join(config.Wallet_path))
 
 	//启动和链接leveldb数据库
-	err = db.InitDB(config.DB_path)
+	err = db.InitDB(config.DB_path, config.DB_path_temp)
 	if err != nil {
 		panic(err)
 	}
@@ -56,10 +75,83 @@ func Register() error {
 	// go server.Start()
 	mining.RegisteMSG()
 
+	//创始节点方式启动
+	if config.InitNode {
+		bhvo, err = startblock.BuildFirstBlock()
+		if err != nil {
+			return err
+		}
+		engine.Log.Info("create initiation block build chain")
+		config.StartBlockHash = bhvo.BH.Hash
+		//构建创始区块成功
+		mining.BuildFirstChain(bhvo)
+		mining.SetHighestBlock(config.Mining_block_start_height)
+		mining.GetLongChain().SyncBlockFinish = true
+		mining.GetLongChain().NoticeLoadBlockForDB()
+		return nil
+	}
+
+	//拉起节点方式启动
+	if config.LoadNode {
+		// engine.Log.Info("拉起见证人节点")
+
+		bhvo := mining.LoadStartBlock()
+		if bhvo == nil {
+			return errors.New("加载本地区块数据失败")
+		}
+		engine.Log.Info("load db initiation block build chain")
+		config.StartBlockHash = bhvo.BH.Hash
+		//从本地数据库创始区块构建链
+		mining.BuildFirstChain(bhvo)
+		// config.InitNode = true
+		mining.SetHighestBlock(db.GetHighstBlock())
+
+		mining.FindBlockHeight()
+
+		if err := mining.GetLongChain().LoadBlockChain(); err != nil {
+			return err
+		}
+		mining.FinishFirstLoadBlockChain()
+
+		// if err := mining.GetLongChain().FirstDownloadBlock(); err != nil {
+		// 	return err
+		// }
+		return nil
+	}
+	//普通启动方式
+	bhvo = mining.LoadStartBlock()
+	if bhvo == nil {
+		engine.Log.Info("neighbor initiation block build chain")
+		//从邻居节点同步区块
+		err = mining.GetFirstBlock()
+		if err != nil {
+			engine.Log.Error("get first block error: %s", err.Error())
+			panic(err.Error())
+		}
+		// engine.Log.Info("用邻居节点区块构建链2")
+		mining.FindBlockHeight()
+	} else {
+		engine.Log.Info("load db initiation block build chain")
+		config.StartBlockHash = bhvo.BH.Hash
+		//从本地数据库创始区块构建链
+		mining.BuildFirstChain(bhvo)
+		mining.FindBlockHeight()
+	}
+	if err := mining.GetLongChain().FirstDownloadBlock(); err != nil {
+		return err
+	}
+
+	engine.Log.Info("build chain success")
+
+	mining.GetLongChain().NoticeLoadBlockForDB()
+	return nil
+
+	//------------------------------
 	bhvo, err = startblock.BuildFirstBlock()
 	if err != nil {
 		return err
 	}
+
 	if bhvo != nil {
 		engine.Log.Info("create initiation block build chain")
 		//构建创始区块成功
@@ -74,20 +166,36 @@ func Register() error {
 			engine.Log.Info("load db initiation block build chain")
 			//从本地数据库创始区块构建链
 			mining.BuildFirstChain(bhvo)
+
+			//拉起见证人节点
+			if config.LoadNode {
+				engine.Log.Info("拉起见证人节点")
+				config.InitNode = true
+				// return nil
+			}
+
 			mining.SetHighestBlock(db.GetHighstBlock())
 			if config.InitNode {
 				mining.GetLongChain()
 			}
 			// engine.Log.Info("从本地数据库创始区块构建链2")
 			mining.FindBlockHeight()
-			mining.GetLongChain().NoticeLoadBlockForDB(true)
-			return nil
+			// if err := mining.GetLongChain().FirstDownloadBlock(); err != nil {
+			// 	return err
+			// }
+			// mining.GetLongChain().NoticeLoadBlockForDB()
+			// return nil
 		} else {
 			engine.Log.Info("neighbor initiation block build chain")
 			//从邻居节点同步区块
 			mining.GetFirstBlock()
 			// engine.Log.Info("用邻居节点区块构建链2")
 			mining.FindBlockHeight()
+
+		}
+
+		if err := mining.GetLongChain().FirstDownloadBlock(); err != nil {
+			return err
 		}
 	}
 	engine.Log.Info("build chain success")
@@ -97,57 +205,8 @@ func Register() error {
 	// 	mining.GetLongChain().SetHighestBlock(1)
 	// }
 	// mining.GetLongChain().GetHighestBlock()
-	mining.GetLongChain().NoticeLoadBlockForDB(false)
+
+	mining.GetLongChain().NoticeLoadBlockForDB()
 	return nil
 
-	//当本地数据库为空时，需要先同步第一个区块，这个只有初始3个矿工需要这个操作
-
-	// fmt.Println("检查区块是否合法")
-	// //检查区块是否被篡改，中间是否有不连续的块。
-	// ok := mining.CheckBlockDB()
-	// if !ok {
-	// 	fmt.Println("验证区块失败")
-	// 	os.Exit(1)
-	// }
-	// // fmt.Println("区块合法性检查完成")
-
-	// fmt.Println("开始加载数据库中的区块")
-	// //加载数据库中的区块
-	// err = mining.LoadBlockChain()
-	// if err != nil {
-	// 	fmt.Println("加载数据库中的区块错误", err)
-	// }
-	// fmt.Println("完成加载数据库中的区块", config.InitNode)
-
-	// if config.InitNode && !config.DB_is_null {
-	// 	mining.SetHighestBlock(mining.GetLongChain().GetLastBlock().Height)
-	// }
-
-	// //如果是创世节点，不用同步区块
-	// if config.InitNode {
-	// 	fmt.Println("开始启动旷工节点")
-	// 	// go mining.Mining()
-	// 	return nil
-	// }
-
-	//一边同步块，一边加载新块
-	//开始同步区块
-	// err = mining.SyncBlockHead()
-	// if err != nil {
-	// 	// fmt.Println("同步区块错误", err)
-	// 	engine.Log.Info("同步区块错误 %o", err)
-	// 	return nil
-	// }
-	// mining.LoadBlockChain()
-	// mining.SyncBlockHead()
-	//同步出块时间
-	// fmt.Println(forks.GetLongChain())
-	// fmt.Println(forks.GetLongChain().witnessChain)
-	// // fmt.Println(forks.GetLongChain())
-	// forks.GetLongChain().witnessChain.StopAllMining()
-	// forks.GetLongChain().witnessChain.BuildMiningTime()
-	// mining.NoticeLoadBlockForDB()
-	// fmt.Println("启动链端完成")
-
-	// return nil
 }

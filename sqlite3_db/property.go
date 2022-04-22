@@ -2,11 +2,13 @@ package sqlite3_db
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 
 	_ "github.com/go-xorm/xorm"
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type Property struct {
 	Hash       string `xorm:"varchar(25) pk notnull unique 'hash'"` //网络节点hash

@@ -39,17 +39,29 @@ func taskFunc(class, params string) {
 	switch class {
 	case Task_class_share_cache_data:
 		go func() {
+			goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+			_, file, line, _ := runtime.Caller(0)
+			utils.AddRuntime(file, line, goroutineId)
+			defer utils.DelRuntime(file, line, goroutineId)
 			//fmt.Println(class, params)
 			taskSyncData([]byte(params))
 			task.Add(time.Now().Unix()+int64(TimeInterval), Task_class_share_cache_data, string(params))
 		}()
 	case Task_class_share_clear_cache:
 		go func() {
+			goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+			_, file, line, _ := runtime.Caller(0)
+			utils.AddRuntime(file, line, goroutineId)
+			defer utils.DelRuntime(file, line, goroutineId)
 			taskClearCache()
 			task.Add(time.Now().Unix()+int64(TimeInterval), Task_class_share_clear_cache, string(params))
 		}()
 	case Task_class_share_clear_cache_data:
 		go func() {
+			goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+			_, file, line, _ := runtime.Caller(0)
+			utils.AddRuntime(file, line, goroutineId)
+			defer utils.DelRuntime(file, line, goroutineId)
 			taskClearCacheData()
 			task.Add(time.Now().Unix()+int64(TimeInterval), Task_class_share_clear_cache_data, string(params))
 		}()

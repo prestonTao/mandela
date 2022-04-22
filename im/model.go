@@ -2,9 +2,11 @@ package im
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 //添加好友时结构体，附带把收款地址带过去
 type FriendInfo struct {

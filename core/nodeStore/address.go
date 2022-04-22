@@ -1,6 +1,7 @@
 package nodeStore
 
 import (
+	"mandela/core/utils"
 	"mandela/core/utils/base58"
 	"bytes"
 	"crypto/sha256"
@@ -36,4 +37,20 @@ func BuildAddr(pubKey []byte) AddressNet {
 func CheckPukAddr(pubKey []byte, addr AddressNet) bool {
 	tagAddr := BuildAddr(pubKey)
 	return bytes.Equal(tagAddr, addr)
+}
+
+/*
+	去除重复地址
+*/
+func RemoveDuplicateAddress(addrs []*AddressNet) []*AddressNet {
+	m := make(map[string]*AddressNet)
+	for i, one := range addrs {
+		// m[hex.EncodeToString(*one)] = addrs[i]
+		m[utils.Bytes2string(*one)] = addrs[i]
+	}
+	dstAddrs := make([]*AddressNet, 0)
+	for _, v := range m {
+		dstAddrs = append(dstAddrs, v)
+	}
+	return dstAddrs
 }

@@ -9,12 +9,16 @@ import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/core/virtual_node/manager"
+	"mandela/protos/go_protos"
 	"mandela/sqlite3_db"
 	"bytes"
-	"encoding/hex"
-	"encoding/json"
+	"strconv"
+	"sync"
 	"time"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
 	//	FindNodeNum    = iota + 101 //查找结点服务id
@@ -69,14 +73,14 @@ func init() {
 func RegisterCoreMsg() {
 	message_center.RegisterMsgVersion()
 
-	message_center.Register_search_super(gconfig.MSGID_checkNodeOnline, findSuperID)           //检查节点是否在线
-	message_center.Register_p2p(gconfig.MSGID_checkNodeOnline_recv, findSuperID_recv)          //检查节点是否在线_返回
-	message_center.Register_neighbor(gconfig.MSGID_getNearSuperIP, GetNearSuperAddr)           //从邻居节点得到自己的逻辑节点
-	message_center.Register_neighbor(gconfig.MSGID_getNearSuperIP_recv, GetNearSuperAddr_recv) //从邻居节点得到自己的逻辑节点_返回
-	// message_center.Register_multicast(gconfig.MSGID_multicast_online_recv, MulticastOnline_recv) //接收节点上线广播
-	message_center.Register_neighbor(gconfig.MSGID_ask_close_conn_recv, AskCloseConn_recv) //询问关闭连接
-	message_center.Register_p2pHE(gconfig.MSGID_TextMsg, TextMsg)                          //接收文本消息
-	message_center.Register_p2pHE(gconfig.MSGID_TextMsg_recv, TextMsg_recv)                //接收文本消息_返回
+	message_center.Register_search_super(gconfig.MSGID_checkNodeOnline, findSuperID)             //检查节点是否在线
+	message_center.Register_p2p(gconfig.MSGID_checkNodeOnline_recv, findSuperID_recv)            //检查节点是否在线_返回
+	message_center.Register_neighbor(gconfig.MSGID_getNearSuperIP, GetNearSuperAddr)             //从邻居节点得到自己的逻辑节点
+	message_center.Register_neighbor(gconfig.MSGID_getNearSuperIP_recv, GetNearSuperAddr_recv)   //从邻居节点得到自己的逻辑节点_返回
+	message_center.Register_multicast(gconfig.MSGID_multicast_online_recv, MulticastOnline_recv) //接收节点上线广播
+	message_center.Register_neighbor(gconfig.MSGID_ask_close_conn_recv, AskCloseConn_recv)       //询问关闭连接
+	message_center.Register_p2pHE(gconfig.MSGID_TextMsg, TextMsg)                                //接收文本消息
+	message_center.Register_p2pHE(gconfig.MSGID_TextMsg_recv, TextMsg_recv)                      //接收文本消息_返回
 
 	message_center.Register_p2p(gconfig.MSGID_SearchAddr, message_center.SearchAddress)                  //搜索节点，返回节点真实地址
 	message_center.Register_p2p(gconfig.MSGID_SearchAddr_recv, message_center.SearchAddress_recv)        //搜索节点，返回节点真实地址_返回
@@ -110,7 +114,8 @@ func SearchNode_recv(c engine.Controller, msg engine.Packet, message *message_ce
 		return
 	}
 	// mid := utils.BytesToInt64(*message.Body.Content)
-	flood.ResponseWait(config.CLASS_get_MachineID, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(config.CLASS_get_MachineID, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(config.CLASS_get_MachineID, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }
 
 // /*
@@ -156,96 +161,113 @@ func SearchNode_recv(c engine.Controller, msg engine.Packet, message *message_ce
 
 // }
 
-// /*
-// 	接收上线的广播
-// */
-// func MulticastOnline_recv(c engine.Controller, msg engine.Packet, message *Message) {
-// 	//	fmt.Println("接收到有节点上线的广播")
+/*
+	接收上线的广播
+*/
+func MulticastOnline_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
+	//	fmt.Println("接收到有节点上线的广播")
 
-// 	// message, err := ParserMessage(&msg.Data, &msg.Dataplus, msg.MsgID)
-// 	// if err != nil {
-// 	// 	// fmt.Println(err)
-// 	// 	return
-// 	// }
-// 	// //自己处理
-// 	// if err := message.ParserContent(); err != nil {
-// 	// 	// fmt.Println(err)
-// 	// 	return
-// 	// }
-// 	if !message.CheckSendhash() {
-// 		return
-// 	}
+	newNode, err := nodeStore.ParseNodeProto(*message.Body.Content)
+	// newNode := new(nodeStore.Node)
+	// decoder := json.NewDecoder(bytes.NewBuffer(*message.Body.Content))
+	// decoder.UseNumber()
+	// err := decoder.Decode(newNode)
+	if err != nil {
+		//		fmt.Println("解析失败", err)
+		return
+	}
 
-// 	//	message := new(Message)
-// 	//	err := json.Unmarshal(msg.Data, message)
-// 	//	if err != nil {
-// 	//		fmt.Println(err)
-// 	//		return
-// 	//	}
+	// engine.Log.Info("检查这个节点是否需要 %s",)
+	// engine.Log.Info("GetNearSuperAddr_recv check need: %s", newNode.IdInfo.Id.B58String())
 
-// 	if nodeStore.NodeSelf.IsSuper {
-// 		mh := nodeStore.AddressNet(*message.Body.Content)
-// 		//继续广播给其他节点
-// 		ids := nodeStore.GetIdsForFar(&mh)
-// 		for _, one := range ids {
-// 			if ss, ok := engine.GetSession(one.B58String()); ok {
-// 				//				ss.Send(MSGID_multicast_online_recv, &msg.Data, false)
-// 				ss.Send(gconfig.MSGID_multicast_online_recv, &msg.Data, &msg.Dataplus, false)
-// 			}
-// 		}
-// 		//广播给代理对象
-// 		pids := nodeStore.GetProxyAll()
-// 		for _, one := range pids {
-// 			if ss, ok := engine.GetSession(one); ok {
-// 				//				ss.Send(MSGID_multicast_online_recv, &msg.Data, false)
-// 				ss.Send(gconfig.MSGID_multicast_online_recv, &msg.Data, &msg.Dataplus, false)
-// 			}
-// 		}
+	manager.AddNewNode(newNode.IdInfo.Id)
 
-// 	}
+	//查询是否已经有这个连接了，有了就不连接
+	//避免地址和node真实地址不对应的情况
+	session := engine.GetSessionByHost(newNode.Addr + ":" + strconv.Itoa(int(newNode.TcpPort)))
+	if session != nil {
+		// name := session.GetName()
+		// addrOne := nodeStore.AddressNet([]byte(session.GetName()))
+		// engine.Log.Info("GetNearSuperAddr_recv conn exist: %s", addrOne.B58String())
+		return
+	}
 
-// 	//自己处理新上线的节点
-// 	//	fmt.Println("有节点上线", hex.EncodeToString(message.Content))
-// 	//检查是否是自己的逻辑节点
-// 	newId := nodeStore.AddressNet(*message.Body.Content)
-// 	ok := nodeStore.CheckNeedNode(&newId)
-// 	if ok {
-// 		//		var head *MessageHead
-// 		mhead := NewMessageHead(&newId, &newId, false)
-// 		mbody := NewMessageBody(nil, "", nil, 0)
-// 		message = NewMessage(mhead, mbody)
+	//		if newNode.IdInfo.Id.B58String() == "5duDDfkY1tChLKGxbAtPdPysp9ghYn" || newNode.IdInfo.Id.B58String() == "5dqqnW3YTxTw9EESzT63qM63zf9BYj" {
+	//		}
+	//		if message.Head.Sender.B58String() == "5dsEMMhVbww4hUXV6VzaeRfHKv1nhh" {
+	//			fmt.Println("查找结果", newNode.IdInfo.Id.B58String())
+	//		}
+	//		fmt.Println("查找结果", newNode.IdInfo.Id.B58String(), newNode.Addr, newNode.TcpPort)
+	//TODO 当真实P2P网络地址和ip端口不对应的情况，容易漏连接某些节点
+	//检查是否需要这个逻辑节点
+	ok := nodeStore.CheckNeedNode(&newNode.IdInfo.Id)
+	if !ok {
+		//		fmt.Println("不需要这个逻辑节点")
+		return
+	}
+	//	fmt.Println("需要这个节点")
+	// engine.Log.Info("GetNearSuperAddr_recv need: %s", newNode.IdInfo.Id.B58String())
+	//检查是否有这个连接
+	// _, ok = engine.GetSession(newNode.IdInfo.Id.B58String())
+	_, ok = engine.GetSession(utils.Bytes2string(newNode.IdInfo.Id))
+	if !ok {
+		//查询是否已经有这个连接了，有了就不连接
+		//避免地址和node真实地址不对应的情况
+		// session := engine.GetSessionByHost(newNode.Addr + ":" + strconv.Itoa(int(newNode.TcpPort)))
+		// if session != nil {
+		// 	// name := session.GetName()
+		// 	addrOne := nodeStore.AddressNet([]byte(session.GetName()))
+		// 	engine.Log.Info("GetNearSuperAddr_recv conn exist: %s", addrOne.B58String())
+		// 	continue
+		// }
+		//		fmt.Println("没有这个连接", message.Hash)
+		_, err := engine.AddClientConn(newNode.Addr, uint32(newNode.TcpPort), false)
+		if err != nil {
+			//			fmt.Println("连接失败", err)
+			// engine.Log.Info("GetNearSuperAddr_recv conn fail: %s %s", newNode.IdInfo.Id.B58String(), err.Error())
+			return
+		}
+		// if session.GetName() != newNode
+		// session.GetName()
+		// nodeStore.FindNode()
+	} else {
+		//		fmt.Println("有连接", message.Hash)
+	}
+	// engine.Log.Info("add super nodeid: %s %+v", newNode.IdInfo.Id.B58String(), newNode)
+	// nodeStore.AddNode(newNode)
 
-// 		nearId := nodeStore.FindNearInSuper(&newId, nil, false)
-// 		if nearId == nil {
-// 			return
-// 		}
-// 		session, ok := engine.GetSession(nearId.B58String())
-// 		if !ok {
-// 			return
-// 		}
-// 		session.Send(gconfig.MSGID_checkNodeOnline, message.Head.JSON(), nil, false)
+	//非超级节点判断超级节点是否改变
+	if !nodeStore.NodeSelf.IsSuper {
+		nearId := nodeStore.FindNearInSuper(&nodeStore.NodeSelf.IdInfo.Id, nil, false)
+		//		nearIdStr := hex.EncodeToString(nearId)
+		// fmt.Println("判断是否需要替换超级节点", nearId.B58String(), nodeStore.SuperPeerId.B58String())
+		if bytes.Equal(*nearId, *nodeStore.SuperPeerId) {
+			return
+		}
+		nodeStore.SuperPeerId = nearId
+		//		nodeStore.SuperPeerIdStr = hex.EncodeToString(nearId)
+		// fmt.Println("超级节点换为:", nodeStore.SuperPeerId.B58String())
+	}
 
-// 		SendSearchAllReplyMsg()
-
-// 	}
-// }
+}
 
 /*
 	查询一个id最近的超级节点id
 */
 func findSuperID(c engine.Controller, msg engine.Packet, message *message_center.Message) {
 
-	data, _ := json.Marshal(nodeStore.NodeSelf)
+	// data, _ := json.Marshal(nodeStore.NodeSelf)
+	data, _ := nodeStore.NodeSelf.Proto()
 	message_center.SendSearchSuperReplyMsg(message, gconfig.MSGID_checkNodeOnline_recv, &data)
 
 }
 
 func findSuperID_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
-
-	newNode := new(nodeStore.Node)
-	decoder := json.NewDecoder(bytes.NewBuffer(*message.Body.Content))
-	decoder.UseNumber()
-	err := decoder.Decode(&newNode)
+	newNode, err := nodeStore.ParseNodeProto(*message.Body.Content)
+	// newNode := new(nodeStore.Node)
+	// decoder := json.NewDecoder(bytes.NewBuffer(*message.Body.Content))
+	// decoder.UseNumber()
+	// err := decoder.Decode(&newNode)
 	// if err := json.Unmarshal(*message.Body.Content, &newNode); err != nil {
 	if err != nil {
 		//		fmt.Println("解析失败", err)
@@ -264,13 +286,14 @@ func GetNearSuperAddr(c engine.Controller, msg engine.Packet, message *message_c
 
 	nodes := make([]nodeStore.Node, 0)
 	ns := nodeStore.GetLogicNodes()
+	ns = append(ns, nodeStore.GetNodesClient()...)
 	idsm := nodeStore.NewIds(*message.Head.Sender, nodeStore.NodeIdLevel)
 	for _, one := range ns {
 
-		if bytes.Equal(*message.Head.Sender, *one) {
+		if bytes.Equal(*message.Head.Sender, one) {
 			continue
 		}
-		idsm.AddId(*one)
+		idsm.AddId(one)
 	}
 
 	ids := idsm.GetIds()
@@ -286,23 +309,52 @@ func GetNearSuperAddr(c engine.Controller, msg engine.Packet, message *message_c
 			// fmt.Println("这个节点为空")
 		}
 	}
-	data, _ := json.Marshal(nodes)
+	// data, _ := json.Marshal(nodes)
+	nodeRepeated := go_protos.NodeRepeated{
+		Nodes: make([]*go_protos.Node, 0),
+	}
+	for _, one := range nodes {
+		idinfo := go_protos.IdInfo{
+			Id:   one.IdInfo.Id,
+			EPuk: one.IdInfo.EPuk,
+			CPuk: one.IdInfo.CPuk[:],
+			V:    one.IdInfo.V,
+			Sign: one.IdInfo.Sign,
+		}
+		nodeOne := go_protos.Node{
+			IdInfo:    &idinfo,
+			IsSuper:   one.IsSuper,
+			Addr:      one.Addr,
+			TcpPort:   uint32(one.TcpPort),
+			IsApp:     one.IsApp,
+			MachineID: one.MachineID,
+			Version:   one.Version,
+		}
+		nodeRepeated.Nodes = append(nodeRepeated.Nodes, &nodeOne)
+	}
+
+	data, _ := nodeRepeated.Marshal()
 
 	message_center.SendNeighborReplyMsg(message, gconfig.MSGID_getNearSuperIP_recv, &data, msg.Session)
 
 }
 
+var GetNearSuperAddr_recvLock = new(sync.Mutex)
+
 /*
 	获取相邻节点的超级节点地址返回
 */
 func GetNearSuperAddr_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
+	GetNearSuperAddr_recvLock.Lock()
+	defer GetNearSuperAddr_recvLock.Unlock()
 
 	//	fmt.Println("获取相邻节点的超级节点地址返回")
 
-	nodes := make([]nodeStore.Node, 0)
-	decoder := json.NewDecoder(bytes.NewBuffer(*message.Body.Content))
-	decoder.UseNumber()
-	err := decoder.Decode(&nodes)
+	nodes, err := nodeStore.ParseNodesProto(message.Body.Content)
+	// nodes := make([]nodeStore.Node, 0)
+	// decoder := json.NewDecoder(bytes.NewBuffer(*message.Body.Content))
+	// decoder.UseNumber()
+	// err := decoder.Decode(&nodes)
 	// if err := json.Unmarshal(*message.Body.Content, &nodes); err != nil {
 	if err != nil {
 		//		fmt.Println("解析失败", err)
@@ -310,10 +362,23 @@ func GetNearSuperAddr_recv(c engine.Controller, msg engine.Packet, message *mess
 	}
 
 	//	fmt.Println("查找结果", newNode.IdInfo.Id.B58String())
-
-	for _, newNode := range nodes {
+	// engine.Log.Info("GetNearSuperAddr_recv find result total %d", len(nodes))
+	for i, _ := range nodes {
+		newNode := nodes[i]
+		// engine.Log.Info("检查这个节点是否需要 %s",)
+		// engine.Log.Info("GetNearSuperAddr_recv check need: %s", newNode.IdInfo.Id.B58String())
 
 		manager.AddNewNode(newNode.IdInfo.Id)
+
+		//查询是否已经有这个连接了，有了就不连接
+		//避免地址和node真实地址不对应的情况
+		session := engine.GetSessionByHost(newNode.Addr + ":" + strconv.Itoa(int(newNode.TcpPort)))
+		if session != nil {
+			// name := session.GetName()
+			// addrOne := nodeStore.AddressNet([]byte(session.GetName()))
+			// engine.Log.Info("GetNearSuperAddr_recv conn exist: %s", addrOne.B58String())
+			continue
+		}
 
 		//		if newNode.IdInfo.Id.B58String() == "5duDDfkY1tChLKGxbAtPdPysp9ghYn" || newNode.IdInfo.Id.B58String() == "5dqqnW3YTxTw9EESzT63qM63zf9BYj" {
 		//		}
@@ -321,26 +386,43 @@ func GetNearSuperAddr_recv(c engine.Controller, msg engine.Packet, message *mess
 		//			fmt.Println("查找结果", newNode.IdInfo.Id.B58String())
 		//		}
 		//		fmt.Println("查找结果", newNode.IdInfo.Id.B58String(), newNode.Addr, newNode.TcpPort)
+		//TODO 当真实P2P网络地址和ip端口不对应的情况，容易漏连接某些节点
 		//检查是否需要这个逻辑节点
 		ok := nodeStore.CheckNeedNode(&newNode.IdInfo.Id)
 		if !ok {
 			//		fmt.Println("不需要这个逻辑节点")
-			return
+			continue
 		}
 		//	fmt.Println("需要这个节点")
+		// engine.Log.Info("GetNearSuperAddr_recv need: %s", newNode.IdInfo.Id.B58String())
 		//检查是否有这个连接
-		_, ok = engine.GetSession(newNode.IdInfo.Id.B58String())
+		// _, ok = engine.GetSession(newNode.IdInfo.Id.B58String())
+		_, ok = engine.GetSession(utils.Bytes2string(newNode.IdInfo.Id))
 		if !ok {
+			//查询是否已经有这个连接了，有了就不连接
+			//避免地址和node真实地址不对应的情况
+			// session := engine.GetSessionByHost(newNode.Addr + ":" + strconv.Itoa(int(newNode.TcpPort)))
+			// if session != nil {
+			// 	// name := session.GetName()
+			// 	addrOne := nodeStore.AddressNet([]byte(session.GetName()))
+			// 	engine.Log.Info("GetNearSuperAddr_recv conn exist: %s", addrOne.B58String())
+			// 	continue
+			// }
 			//		fmt.Println("没有这个连接", message.Hash)
 			_, err := engine.AddClientConn(newNode.Addr, uint32(newNode.TcpPort), false)
 			if err != nil {
 				//			fmt.Println("连接失败", err)
-				return
+				// engine.Log.Info("GetNearSuperAddr_recv conn fail: %s %s", newNode.IdInfo.Id.B58String(), err.Error())
+				continue
 			}
+			// if session.GetName() != newNode
+			// session.GetName()
+			// nodeStore.FindNode()
 		} else {
 			//		fmt.Println("有连接", message.Hash)
 		}
-		nodeStore.AddNode(&newNode)
+		// engine.Log.Info("add super nodeid: %s %+v", newNode.IdInfo.Id.B58String(), newNode)
+		// nodeStore.AddNode(newNode)
 
 		//非超级节点判断超级节点是否改变
 		if !nodeStore.NodeSelf.IsSuper {
@@ -348,7 +430,7 @@ func GetNearSuperAddr_recv(c engine.Controller, msg engine.Packet, message *mess
 			//		nearIdStr := hex.EncodeToString(nearId)
 			// fmt.Println("判断是否需要替换超级节点", nearId.B58String(), nodeStore.SuperPeerId.B58String())
 			if bytes.Equal(*nearId, *nodeStore.SuperPeerId) {
-				return
+				continue
 			}
 			nodeStore.SuperPeerId = nearId
 			//		nodeStore.SuperPeerIdStr = hex.EncodeToString(nearId)
@@ -487,18 +569,19 @@ func TextMsg_recv(c engine.Controller, msg engine.Packet, message *message_cente
 
 	//	fmt.Println("这个文本消息是自己的")
 	bs := []byte("ok")
-	flood.ResponseWait(config.CLASS_im_msg_come, hex.EncodeToString(message.Body.Hash), &bs)
+	// flood.ResponseWait(config.CLASS_im_msg_come, hex.EncodeToString(message.Body.Hash), &bs)
+	flood.ResponseWait(config.CLASS_im_msg_come, utils.Bytes2string(message.Body.Hash), &bs)
 
 }
 
 /*
 	询问关闭这个链接
 */
-func AskCloseConn(name string) {
-	if session, ok := engine.GetSession(name); ok {
-		session.Send(gconfig.MSGID_ask_close_conn_recv, nil, nil, false)
-	}
-}
+// func AskCloseConn(name string) {
+// 	if session, ok := engine.GetSession(name); ok {
+// 		session.Send(gconfig.MSGID_ask_close_conn_recv, nil, nil, false)
+// 	}
+// }
 
 /*
 	询问关闭这个链接
@@ -506,18 +589,16 @@ func AskCloseConn(name string) {
 */
 func AskCloseConn_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
 
-	mh := nodeStore.AddressFromB58String(msg.Session.GetName())
+	// mh := nodeStore.AddressFromB58String(msg.Session.GetName())
+	mh := nodeStore.AddressNet([]byte(msg.Session.GetName()))
 
-	// mh, err := utils.FromB58String(msg.Session.GetName())
-	// if err != nil {
-	// 	// fmt.Println("这个session name解析错误")
-	// 	return
-	// }
-	node := nodeStore.FindNode(&mh)
-	if node == nil {
+	// node := nodeStore.FindNodeInLogic(&mh)
+	// node := nodeStore.FindNode(&mh)
+	if nodeStore.FindNodeInLogic(&mh) == nil && !nodeStore.FindWhiteList(&mh) {
+
 		//自己也没有这个连接的引用，则关闭这个链接
+		engine.Log.Info("Close this session")
 		msg.Session.Close()
-		// fmt.Println("关闭了这个没用链接", msg.Session.GetName())
 	}
 }
 

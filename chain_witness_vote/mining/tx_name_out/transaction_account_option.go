@@ -9,15 +9,15 @@ import (
 /*
 	注销域名，退还押金
 */
-func NameOut(addr *crypto.AddressCoin, amount, gas uint64, pwd string, name string) error {
+func NameOut(srcAddr, addr *crypto.AddressCoin, amount, gas, frozenHeight uint64, pwd, comment string, name string) (mining.TxItr, error) {
 
 	//缴纳押金注册一个名称
-	err := mining.GetLongChain().GetBalance().BuildOtherTx(config.Wallet_tx_type_account_cancel,
-		addr, 0, gas, pwd, name)
+	txItr, err := mining.GetLongChain().GetBalance().BuildOtherTx(config.Wallet_tx_type_account_cancel,
+		srcAddr, addr, 0, gas, frozenHeight, pwd, comment, name)
 	if err != nil {
 		// fmt.Println("退还押金失败", err)
 	} else {
 		// fmt.Println("退还押金完成")
 	}
-	return err
+	return txItr, err
 }

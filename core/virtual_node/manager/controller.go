@@ -2,37 +2,38 @@ package manager
 
 import (
 	"mandela/config"
+	"mandela/core/engine"
 	"mandela/core/message_center"
 	"mandela/core/message_center/flood"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/core/virtual_node"
 	"bytes"
-	"encoding/hex"
-	"encoding/json"
+	"runtime"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	查询邻居节点
 */
 func FindNearVnode() {
+	goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+	_, file, line, _ := runtime.Caller(0)
+	engine.AddRuntime(file, line, goroutineId)
+	defer engine.DelRuntime(file, line, goroutineId)
 	c := virtual_node.GetFindVnodeChan()
 
 	// engine.Log.Info("开始接收查询邻居节点消息信号")
 
 	for one := range c {
-		// fmt.Println("接收到查询邻居节点消息信号 111111")
-		bs, err := json.Marshal(one)
+		// bs, err := json.Marshal(one)
+		bs, err := one.Proto()
 		if err != nil {
-			// fmt.Println("json error ", err)
 			continue
 		}
-		// fmt.Println("接收到查询邻居节点消息信号 2222222222222")
-		// recvId := nodeStore.AddressNet(one.Target)
-		// fmt.Println("接收到查询邻居节点消息信号 33333333333333")
-		// fmt.Println("发送给", one.Target.Nid.B58String())
 		message_center.SendP2pMsgHE(config.MSGID_vnode_getNearSuperIP, &one.Target.Nid, &bs)
-		// fmt.Println("接收到查询邻居节点消息信号 444444444444")
 	}
 	// engine.Log.Info("停止接收查询邻居节点消息信号")
 }
@@ -65,9 +66,9 @@ func LoopGetVnodeinfo() {
 		nodes := nodeStore.GetLogicNodes()
 		for _, one := range nodes {
 			nodeinfo := virtual_node.Vnodeinfo{
-				Nid:   *one,                                //节点真实网络地址
-				Index: 0,                                   //节点第几个空间，从1开始,下标为0的节点为实际节点。
-				Vid:   virtual_node.AddressNetExtend(*one), //vid，虚拟节点网络地址
+				Nid:   one,                                //节点真实网络地址
+				Index: 0,                                  //节点第几个空间，从1开始,下标为0的节点为实际节点。
+				Vid:   virtual_node.AddressNetExtend(one), //vid，虚拟节点网络地址
 			}
 			virtual_node.AddLogicVnodeinfo(nodeinfo)
 		}
@@ -79,8 +80,11 @@ func LoopGetVnodeinfo() {
 	已开通则添加这个节点，未开通则抛弃。
 */
 func AddNewNode(addr nodeStore.AddressNet) {
-	go func() {
-
+	utils.Go(func() {
+		goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+		_, file, line, _ := runtime.Caller(0)
+		engine.AddRuntime(file, line, goroutineId)
+		defer engine.DelRuntime(file, line, goroutineId)
 		//自己节点没开通虚拟节点，就不需要添加
 		if len(virtual_node.GetVnodeNumber()) <= 0 {
 			return
@@ -99,7 +103,8 @@ func AddNewNode(addr nodeStore.AddressNet) {
 		if !ok || isSelf {
 			return
 		}
-		bs := flood.WaitRequest(message_center.CLASS_vnode_getstate, hex.EncodeToString(message.Body.Hash), 0)
+		// bs := flood.WaitRequest(message_center.CLASS_vnode_getstate, hex.EncodeToString(message.Body.Hash), 0)
+		bs, _ := flood.WaitRequest(message_center.CLASS_vnode_getstate, utils.Bytes2string(message.Body.Hash), 0)
 		if bs == nil || len(*bs) <= 0 {
 			return
 		}
@@ -109,5 +114,5 @@ func AddNewNode(addr nodeStore.AddressNet) {
 			vnodeinfo := virtual_node.BuildNodeinfo(i, addr)
 			virtual_node.AddLogicVnodeinfo(*vnodeinfo)
 		}
-	}()
+	})
 }

@@ -1,0 +1,21 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+import "txbase.proto";
+
+message TxTokenPay {
+	TxBase           TxBase             = 1;
+    uint64           Token_Vin_total    = 2; //输入交易数量
+    repeated Vin     Token_Vin          = 3; //交易输入
+    uint64           Token_Vout_total   = 4; //输出交易数量
+    repeated Vout    Token_Vout         = 5; //交易输出
+}
+

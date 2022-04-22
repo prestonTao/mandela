@@ -1,6 +1,7 @@
 package cachedata
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 
@@ -76,7 +77,7 @@ func buildHash(key []byte) *utils.Multihash {
 //检查当前节点是否是共享节点
 func checkOwn(id *utils.Multihash, ownid []*utils.Multihash) bool {
 	for _, v := range ownid {
-		if id.B58String() == v.B58String() {
+		if bytes.Equal(id, v) {
 			return true
 		}
 	}

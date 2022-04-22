@@ -67,7 +67,7 @@ func (this *CustomAuth) SendKey(conn net.Conn, session msgE.Session, name string
 
 	lenght := int32(len(name))
 	buf := bytes.NewBuffer([]byte{})
-	binary.Write(buf, binary.BigEndian, lenght)
+	binary.Write(buf, binary.LittleEndian, lenght)
 
 	buf.Write([]byte(name))
 	conn.Write(buf.Bytes())
@@ -78,7 +78,7 @@ func (this *CustomAuth) SendKey(conn net.Conn, session msgE.Session, name string
 func (this *CustomAuth) RecvKey(conn net.Conn) (name string, err error) {
 	lenghtByte := make([]byte, 4)
 	io.ReadFull(conn, lenghtByte)
-	lenght := binary.BigEndian.Uint32(lenghtByte)
+	lenght := binary.LittleEndian.Uint32(lenghtByte)
 	nameByte := make([]byte, lenght)
 
 	n, e := conn.Read(nameByte)

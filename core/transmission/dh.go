@@ -6,13 +6,15 @@ import (
 	"mandela/core/utils"
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"path/filepath"
 
+	jsoniter "github.com/json-iterator/go"
 	"golang.org/x/crypto/curve25519"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
 	dhkey = "dhkey.key"

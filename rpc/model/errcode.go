@@ -10,7 +10,7 @@ const (
 	NoMethod               = 4001 //没有这个方法
 	TypeWrong              = 5001 //参数类型错误
 	NoField                = 5002 //缺少参数
-	Nomarl                 = 5003 //一般错误
+	Nomarl                 = 5003 //一般错误，请看错误提示信息
 	Timeout                = 5004 //超时
 	Exist                  = 5005 //已经存在
 	FailPwd                = 5006 //密码错误
@@ -21,6 +21,10 @@ const (
 	RuleField              = 5011 //地址角色不正确
 	BalanceNotEnough       = 5012 //余额不足
 	VoteExist              = 5013 //投票已经存在
+	VoteNotOpen            = 5014 //投票功能还未开放
+	RewardCountSync        = 5015 //轻节点奖励异步执行中
+	CommentOverLengthMax   = 5016 //备注信息字符串超过最大长度
+	GasTooLittle           = 5017 //交易手续费太少
 )
 
 var codes = map[int]string{
@@ -38,6 +42,10 @@ var codes = map[int]string{
 	RuleField:              "",
 	BalanceNotEnough:       "BalanceNotEnough",
 	VoteExist:              "VoteExist",
+	VoteNotOpen:            "VoteNotOpen",
+	RewardCountSync:        "reward sync execution",
+	CommentOverLengthMax:   "comment over length max",
+	GasTooLittle:           "gas too little",
 }
 
 func Errcode(code int, p ...string) (res []byte, err error) {

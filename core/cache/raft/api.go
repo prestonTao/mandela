@@ -3,6 +3,7 @@ package raft
 import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
+	"bytes"
 )
 
 var (
@@ -49,7 +50,7 @@ func DelTeam(teamid *utils.Multihash) error {
 //获取当前角色
 func GetRole(teamid, nodeid *utils.Multihash) string {
 	raftteam := GetTeam(teamid)
-	if raftteam.Role.Nodeid.B58String() == nodeid.B58String() {
+	if bytes.Equal(raftteam.Role.Nodeid, nodeid) {
 		return raftteam.Role.Role
 	} else {
 		return Follower

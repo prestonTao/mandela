@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -58,12 +57,12 @@ type TData struct {
 	Data   []Item `json:"data"`
 }
 type Item struct {
-	Addr     string
-	Txid     string
-	Value    uint64
-	OutIndex uint64
-	VoteType uint16
-	Height   uint64
+	Addr      string
+	Txid      string
+	Value     uint64
+	VoutIndex uint64
+	VoteType  uint16
+	Height    uint64
 }
 
 //解析txitem
@@ -82,7 +81,7 @@ func ParseTxItems(jsonstr string) ([]*mining.TxItem, error) {
 	for _, val := range tdata.Data {
 		addr := crypto.AddressFromB58String(val.Addr)
 		txid, _ := hex.DecodeString(val.Txid)
-		it := &mining.TxItem{Height: val.Height, Addr: &addr, Txid: txid, Value: val.Value, OutIndex: val.OutIndex, VoteType: val.VoteType}
+		it := &mining.TxItem{Height: val.Height, Addr: &addr, Txid: txid, Value: val.Value, VoutIndex: val.VoutIndex, VoteType: val.VoteType}
 		txitem = append(txitem, it)
 	}
 	//fmt.Printf("%+v", txitem[0])
@@ -90,12 +89,12 @@ func ParseTxItems(jsonstr string) ([]*mining.TxItem, error) {
 }
 
 //解析交易
-func ParseTxItr(bs []byte) (mining.TxItr, error) {
-	return mining.ParseTxBase(&bs)
-	// tx := mining.Tx_Pay{}
-	// err := json.Unmarshal(bs, &tx)
-	// return tx, err
-}
+// func ParseTxItr(bs []byte) (mining.TxItr, error) {
+// 	return mining.ParseTxBase(&bs)
+// 	// tx := mining.Tx_Pay{}
+// 	// err := json.Unmarshal(bs, &tx)
+// 	// return tx, err
+// }
 
 //验证待签名数据是否正确
 func ParseAddrData(jsonstr string) (map[string]uint64, error) {

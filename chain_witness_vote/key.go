@@ -4,12 +4,15 @@ import (
 	"mandela/config"
 	"mandela/core/utils"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io/ioutil"
 	"path/filepath"
 	"sync"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var keyLock = new(sync.RWMutex)
 var key *Key
@@ -144,10 +147,11 @@ func LoadKeyStoreToLocal() (*KeyStore, error) {
 		return nil, err
 	}
 	keyStore := new(KeyStore)
+
+	// err = json.Unmarshal(bs, keyStore)
 	decoder := json.NewDecoder(bytes.NewBuffer(bs))
 	decoder.UseNumber()
 	err = decoder.Decode(keyStore)
-	// err = json.Unmarshal(bs, keyStore)
 	return keyStore, err
 
 }

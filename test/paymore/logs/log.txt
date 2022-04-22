@@ -1,0 +1,72 @@
+2022/04/14 00:01:47.435 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:01:47.436 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:01:47.437 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:07:47.421 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:07:47.422 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:07:47.422 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:13:47.423 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:13:47.424 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:13:47.424 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:19:47.424 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:19:47.429 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:19:47.429 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:25:47.417 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:25:47.418 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:25:47.418 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:31:47.422 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:31:47.423 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:31:47.423 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:37:47.427 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:37:47.427 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:37:47.427 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:43:47.430 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:43:47.431 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:43:47.431 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:49:47.424 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:49:47.425 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:49:47.425 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 00:55:47.426 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 00:55:47.427 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 00:55:47.427 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:01:47.427 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:01:47.428 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:01:47.428 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:07:47.414 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:07:47.415 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:07:47.416 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:13:47.421 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:13:47.422 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:13:47.422 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:19:47.424 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:19:47.425 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:19:47.425 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:25:47.424 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:25:47.425 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:25:47.426 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:31:47.422 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:31:47.422 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:31:47.423 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:37:47.423 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:37:47.424 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:37:47.424 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:43:47.430 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:43:47.430 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:43:47.432 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/14 01:49:47.427 [I] [txitem_merge.go:71]  check tx merge is open:false
+2022/04/14 01:49:47.428 [I] [txitem_merge.go:73]  check tx merge is open:false
+2022/04/14 01:49:47.428 [I] [txitem_merge.go:91]  333333333333333333
+2022/04/17 22:55:14.302 [I] [txitem_merge.go:89]  check tx merge is open:false
+2022/04/17 22:55:14.303 [I] [txitem_merge.go:91]  check tx merge is open:false
+2022/04/17 22:55:14.303 [I] [txitem_merge.go:110]  333333333333333333
+2022/04/17 23:05:14.283 [I] [txitem_merge.go:89]  check tx merge is open:false
+2022/04/17 23:05:14.284 [I] [txitem_merge.go:91]  check tx merge is open:false
+2022/04/17 23:05:14.285 [I] [txitem_merge.go:110]  333333333333333333
+2022/04/17 23:15:14.296 [I] [txitem_merge.go:89]  check tx merge is open:false
+2022/04/17 23:15:14.297 [I] [txitem_merge.go:91]  check tx merge is open:false
+2022/04/17 23:15:14.297 [I] [txitem_merge.go:110]  333333333333333333
+2022/04/17 23:25:14.295 [I] [txitem_merge.go:89]  check tx merge is open:false
+2022/04/17 23:25:14.296 [I] [txitem_merge.go:91]  check tx merge is open:false
+2022/04/17 23:25:14.296 [I] [txitem_merge.go:110]  333333333333333333
+2022/04/17 23:35:14.282 [I] [txitem_merge.go:89]  check tx merge is open:false
+2022/04/17 23:35:14.283 [I] [txitem_merge.go:91]  check tx merge is open:false
+2022/04/17 23:35:14.283 [I] [txitem_merge.go:110]  333333333333333333

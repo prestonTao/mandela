@@ -62,9 +62,9 @@ func (this *Kademlia) Get(nodeId *big.Int) []*big.Int {
 func (this *Kademlia) clear() {
 }
 
-func NewKademlia() *Kademlia {
+func NewKademlia(length int) *Kademlia {
 	k := &Kademlia{
-		nodes: []*big.Int{},
+		nodes: make([]*big.Int, 0, length),
 	}
 	return k
 }

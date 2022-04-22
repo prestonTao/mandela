@@ -6,7 +6,7 @@ import (
 	"mandela/core/keystore"
 	mc "mandela/core/message_center"
 	"mandela/core/message_center/flood"
-	"encoding/hex"
+	"mandela/core/utils"
 )
 
 /*
@@ -38,7 +38,7 @@ func GetWalletAddr(c engine.Controller, msg engine.Packet, message *mc.Message) 
 	// }
 	// bs := make([]byte, 0)
 	// bs = append(bs, addr)
-	bs := []byte(addr)
+	bs := []byte(addr.Addr)
 
 	//回复给发送者
 	mc.SendP2pReplyMsg(message, config.MSGID_sharebox_getNodeWalletReceiptAddress_recv, &bs)
@@ -69,5 +69,6 @@ func GetWalletAddr_recv(c engine.Controller, msg engine.Packet, message *mc.Mess
 	// 	// fmt.Println(err)
 	// 	return
 	// }
-	flood.ResponseWait(mc.CLASS_getWalletAddr, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(mc.CLASS_getWalletAddr, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(mc.CLASS_getWalletAddr, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }

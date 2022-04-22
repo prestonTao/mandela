@@ -15,23 +15,39 @@ import (
 	"time"
 )
 
+type NodeClass int
+
 const (
-	Node_min = 50 //每个节点的最少连接数量
+	Node_min = 0 //每个节点的最少连接数量
+
+	Node_type_all        NodeClass = 0 //包含所有类型
+	Node_type_logic      NodeClass = 1 //自己需要的逻辑节点
+	Node_type_client     NodeClass = 2 //保存其他逻辑节点连接到自己的节点，都是超级节点
+	Node_type_proxy      NodeClass = 3 //被代理的节点
+	Node_type_other      NodeClass = 4 //每个节点有最少连接数量
+	Node_type_white_list NodeClass = 5 //连接白名单
 )
 
 var (
-	NodeSelf         *Node            = new(Node)                    //保存自己的id信息和ip地址和端口号
-	Nodes                             = new(sync.Map)                //超级节点。key:string=节点id,value:*Node=节点信息;
-	Proxys                            = new(sync.Map)                //被代理的节点。key:string=节点id;value:*Node=节点信息;
-	OtherNodes                        = new(sync.Map)                //每个节点有最少连接数量。key:string=节点id;value:*AddressNet=节点地址;
+	NodeSelf *Node = new(Node) //保存自己的id信息和ip地址和端口号
+
+	nodesLock = new(sync.RWMutex)      //
+	nodes     = make(map[string]*Node) //保存所有类型的节点，通过Type参数区分开
+
+	// Nodes                             = new(sync.Map)                //超级节点。key:string=节点id,value:*Node=节点信息;
+	// Proxys                            = new(sync.Map)                //被代理的节点。key:string=节点id;value:*Node=节点信息;
+	// OtherNodes                        = new(sync.Map)                //每个节点有最少连接数量。key:string=节点id;value:*AddressNet=节点地址;
+	// NodesClient                       = new(sync.Map)                //保存其他逻辑节点连接到自己的节点，都是超级节点
 	OutFindNode      chan *AddressNet = make(chan *AddressNet, 1000) //需要查询的逻辑节点
 	OutCloseConnName                  = make(chan *AddressNet, 1000) //废弃的nodeid，需要询问是否关闭
 	SuperPeerId      *AddressNet                                     //超级节点名称
 	NodeIdLevel      uint             = 256                          //节点id长度
+	HaveNewNode                       = make(chan *Node, 100)        //当添加新的超级节点时，给他个信号
 	// LanNode                           = new(sync.Map)                //局域网节点。key:string=节点id;value:*Node=节点信息;
 	// Groups           *NodeGroup       = NewNodeGroup()               //组
 	// once             sync.Once
 	// Key              *ECCKey
+	WhiteList = new(sync.Map) //连接白名单
 )
 
 func Init() int {
@@ -43,6 +59,7 @@ func Init() int {
 	}
 	NodeSelf.IdInfo = *idinfo
 	NodeSelf.MachineID = utils.GetRandomOneInt64()
+	NodeSelf.Version = config.Version_0
 	// fmt.Println("id =", idinfo.Id.B58String())
 	return 0
 
@@ -77,8 +94,10 @@ func BuildIdinfo(pwd string) (*IdInfo, error) {
 	// dhPuk := keyPair.KeyPair.PublicKey
 	// fmt.Println("cpuk:", hex.EncodeToString(dhPuk[:]), hex.EncodeToString(cpuk[:]))
 
-	addr := keystore.GetCoinbase()
-	_, prk, puk, err := keystore.GetKeyByAddr(addr, pwd)
+	prk, puk, err := keystore.GetNetAddr(pwd)
+
+	// addr := keystore.GetCoinbase()
+	// _, prk, puk, err := keystore.GetKeyByAddr(addr.Addr, pwd)
 	if err != nil {
 		return nil, err
 	}
@@ -146,19 +165,36 @@ func InitNodeStore() int {
 //}
 
 //添加一个代理节点
-func AddProxyNode(node *Node) {
-	Proxys.Store(node.IdInfo.Id.B58String(), node)
+func AddProxyNode(node Node) {
+	// Proxys.Store(node.IdInfo.Id.B58String(), node)
+	engine.Log.Info("add proxys nodeid %s", node.IdInfo.Id.B58String())
+	node.Type = Node_type_proxy
+	nodesLock.Lock()
+	nodes[utils.Bytes2string(node.IdInfo.Id)] = &node
+	nodesLock.Unlock()
+	// Proxys.Store(utils.Bytes2string(node.IdInfo.Id), &node)
 }
 
 //得到一个代理节点
 func GetProxyNode(id string) (node *Node, ok bool) {
-	var v interface{}
-	v, ok = Proxys.Load(id)
-	if v == nil {
-		return nil, ok
+
+	nodesLock.RLock()
+	node, ok = nodes[id]
+	if node != nil && node.Type != Node_type_proxy {
+		node = nil
+		ok = false
 	}
-	node = v.(*Node)
+	nodesLock.RUnlock()
+
 	return
+
+	// var v interface{}
+	// v, ok = Proxys.Load(id)
+	// if v == nil {
+	// 	return nil, ok
+	// }
+	// node = v.(*Node)
+	// return
 }
 
 /*
@@ -197,37 +233,84 @@ func GetProxyNode(id string) (node *Node, ok bool) {
 	检查这个节点是否是自己的逻辑节点，如果是，则保存
 	不保存自己
 */
-func AddNode(node *Node) {
+func AddNode(node Node) bool {
 	//	initIds()
+	engine.Log.Info("add node: %s", node.IdInfo.Id.B58String())
 
 	//不添加自己
 	if bytes.Equal(node.IdInfo.Id, NodeSelf.IdInfo.Id) {
-		return
+		return false
 	}
 
 	//检查是否够最少连接数量
-	total := 0
-	OtherNodes.Range(func(k, v interface{}) bool {
-		total++
+	// total := 0
+	// OtherNodes.Range(func(k, v interface{}) bool {
+	// 	total++
+	// 	return true
+	// })
+	// //不够就保存
+	// if total < Node_min {
+	// 	//保存
+	// 	OtherNodes.Store(utils.Bytes2string(node.IdInfo.Id), node)
+	// }
+
+	//检查是否在白名单中
+	if FindWhiteList(&node.IdInfo.Id) {
+		nodesLock.Lock()
+		node.Type = Node_type_white_list
+		nodes[utils.Bytes2string(node.IdInfo.Id)] = &node
+		nodesLock.Unlock()
 		return true
-	})
-	//不够就保存
-	if total < Node_min {
-		//保存
-		OtherNodes.Store(node.IdInfo.Id.B58String(), node)
 	}
 
 	idm := NewIds(NodeSelf.IdInfo.Id, NodeIdLevel)
-	ids := GetLogicNodes()
-	for _, one := range ids {
-		idm.AddId(*one)
+	// ids := GetLogicNodes()
+
+	nodesLock.Lock()
+
+	//检查是否够最少连接数量
+	total := 0
+	for _, one := range nodes {
+		if one.Type != Node_type_logic {
+			continue
+		}
+		total += 1
+		// ids = append(ids, one.IdInfo.Id)
+		idm.AddId(one.IdInfo.Id)
 	}
+	//不够就保存
+	if total < Node_min {
+		node.Type = Node_type_logic
+		nodes[utils.Bytes2string(node.IdInfo.Id)] = &node
+		nodesLock.Unlock()
+		return true
+	}
+
+	// for _, one := range ids {
+	// 	idm.AddId(one)
+	// }
 
 	ok, removeIDs := idm.AddId(node.IdInfo.Id)
 	if ok {
 		//		fmt.Println("添加成功", new(big.Int).SetBytes(node.IdInfo.Id.Data()).Int64())
 		node.lastContactTimestamp = time.Now()
-		Nodes.Store(node.IdInfo.Id.B58String(), node)
+		// engine.Log.Info("Nodes super add: %s %d", node.IdInfo.Id.B58String(), len(removeIDs))
+
+		nodeLoad, ok := nodes[utils.Bytes2string(node.IdInfo.Id)]
+		if ok {
+			nodeLoad.Type = Node_type_logic
+		} else {
+			node.Type = Node_type_logic
+			nodes[utils.Bytes2string(node.IdInfo.Id)] = &node
+		}
+
+		// Nodes.Store(utils.Bytes2string(node.IdInfo.Id), &node)
+
+		select {
+		case HaveNewNode <- &node:
+		default:
+		}
+
 		//修改超级节点，普通节点经常切换影响网络
 		addrNet := AddressNet(idm.GetIndex(0))
 		SuperPeerId = &addrNet
@@ -238,13 +321,47 @@ func AddNode(node *Node) {
 			//			delete(Nodes, idOne)
 			//			OutCloseConnName <- idOne
 			addrNet := AddressNet(one)
-			Nodes.Delete(addrNet.B58String())
-			OutCloseConnName <- &addrNet
+			addrStr := utils.Bytes2string(addrNet)
+			//如果自己是对方节点的逻辑节点，则不删除，保存到ClientNodes中
+
+			nodeLoad, ok := nodes[addrStr]
+			if ok {
+				if nodeLoad.Type == Node_type_white_list {
+					continue
+				}
+				// engine.Log.Info("add client nodeid %s", node.IdInfo.Id.B58String())
+				nodeLoad.Type = Node_type_client
+			}
+			if !ok {
+				continue
+			}
+
+			// nodeOne, ok := Nodes.Load(addrStr)
+			// if !ok {
+			// 	continue
+			// }
+			// Nodes.Delete(addrStr)
+			// NodesClient.Store(addrStr, nodeOne)
+
+			// engine.Log.Info("Nodes super del: %s", addrNet.B58String())
+
+			//如果排除的节点在自己的白名单中，就不询问关闭连接了
+			if FindWhiteList(&addrNet) {
+				continue
+			}
+			//询问对方，自己是否是对方的逻辑节点，如果是则保留连接，如果不是，则关闭连接
+			select {
+			case OutCloseConnName <- &addrNet:
+			default:
+			}
+			//TODO 以上是询问对方的方式自治网络，需要对方配合，如果对方不配合，可以直接关闭连接，让对方重新连接自己
+
 		}
 
 	}
+	nodesLock.Unlock()
 	//	fmt.Println("添加一个node", node.IdInfo.Id.B58String())
-	return
+	return ok
 
 }
 
@@ -252,10 +369,27 @@ func AddNode(node *Node) {
 	删除一个节点，包括超级节点和代理节点
 */
 func DelNode(id *AddressNet) {
-	idStr := id.B58String()
-	Nodes.Delete(idStr)
-	Proxys.Delete(idStr)
-	OtherNodes.Delete(idStr)
+	idStr := utils.Bytes2string(*id) //  id.B58String()
+	engine.Log.Info("delete client nodeid %s", id.B58String())
+
+	nodesLock.Lock()
+
+	delete(nodes, idStr)
+
+	nodesLock.Unlock()
+
+	// // engine.Log.Info("Nodes super del: %s", id.B58String())
+	// Nodes.Delete(idStr)
+	// // engine.Log.Info("delete proxys nodeid %s", id.B58String())
+	// Proxys.Delete(idStr)
+	// // Proxys.Range(func(k, v interface{}) bool {
+	// // 	keyStr := k.(string)
+	// // 	id := AddressNet([]byte(keyStr))
+	// // 	engine.Log.Info("proxys list one %s", id.B58String())
+	// // 	return true
+	// // })
+	// OtherNodes.Delete(idStr)
+	// NodesClient.Delete(idStr)
 	engine.RemoveSession(idStr)
 }
 
@@ -263,20 +397,78 @@ func DelNode(id *AddressNet) {
 	通过id查找一个节点
 */
 func FindNode(id *AddressNet) *Node {
-	v, ok := Nodes.Load(id.B58String())
-	if ok {
-		return v.(*Node)
-	}
-	v, ok = OtherNodes.Load(id.B58String())
-	if ok {
-		return v.(*Node)
-	}
+	idStr := utils.Bytes2string(*id)
+	// engine.Log.Info("Nodes super add: %s", id.B58String())
 
-	v, ok = Proxys.Load(id.B58String())
-	if ok {
-		return v.(*Node)
+	var node *Node
+	// var ok bool
+	nodesLock.RLock()
+	node, _ = nodes[idStr]
+	nodesLock.RUnlock()
+	return node
+	// v, ok := Nodes.Load(idStr)
+	// if ok {
+	// 	return v.(*Node)
+	// }
+	// v, ok = OtherNodes.Load(idStr)
+	// if ok {
+	// 	return v.(*Node)
+	// }
+
+	// v, ok = Proxys.Load(idStr)
+	// if ok {
+	// 	return v.(*Node)
+	// }
+
+	// v, ok = NodesClient.Load(idStr)
+	// if ok {
+	// 	return v.(*Node)
+	// }
+	// return nil
+}
+
+func FindNodeInLogic(id *AddressNet) *Node {
+	idStr := utils.Bytes2string(*id)
+
+	var node *Node
+	// var ok bool
+	nodesLock.RLock()
+	node, _ = nodes[idStr]
+	nodesLock.RUnlock()
+	if node != nil && node.Type != Node_type_logic && node.Type != Node_type_white_list {
+		return nil
 	}
-	return nil
+	return node
+
+	// v, ok := Nodes.Load(idStr)
+	// if ok {
+	// 	return v.(*Node)
+	// }
+	// return nil
+}
+
+/*
+	对比逻辑节点是否有变化
+*/
+func EqualLogicNodes(ids []AddressNet) bool {
+	newLogicNodes := GetLogicNodes()
+	if len(ids) != len(newLogicNodes) {
+		return true
+	}
+	isChange := false
+	nodesLock.RLock()
+	for _, one := range ids {
+		idStr := utils.Bytes2string(one)
+		// _, ok := Nodes.Load(idStr)
+		_, ok := nodes[idStr]
+		if !ok {
+			isChange = true
+			break
+			// return true
+		}
+	}
+	nodesLock.RUnlock()
+	return isChange
 }
 
 /*
@@ -287,22 +479,35 @@ func FindNode(id *AddressNet) *Node {
 	@return         查找到的节点id，可能为空
 */
 func FindNearInSuper(nodeId, outId *AddressNet, includeSelf bool) *AddressNet {
-	kl := NewKademlia()
+	kl := NewKademlia(len(nodes) + 1)
 	if includeSelf {
 		kl.Add(new(big.Int).SetBytes(NodeSelf.IdInfo.Id))
 	}
-	outIdStr := ""
-	if outId != nil {
-		outIdStr = outId.B58String()
-	}
-	Nodes.Range(func(k, v interface{}) bool {
-		if k.(string) == outIdStr {
-			return true
+	// outIdStr := ""
+	// if outId != nil {
+	// 	outIdStr = utils.Bytes2string(*outId)
+	// }
+
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_logic && one.Type != Node_type_white_list {
+			continue
 		}
-		value := v.(*Node)
-		kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
-		return true
-	})
+		if outId != nil && bytes.Equal(one.IdInfo.Id, *outId) {
+			continue
+		}
+		kl.Add(new(big.Int).SetBytes(one.IdInfo.Id))
+	}
+	nodesLock.RUnlock()
+
+	// Nodes.Range(func(k, v interface{}) bool {
+	// 	if k.(string) == outIdStr {
+	// 		return true
+	// 	}
+	// 	value := v.(*Node)
+	// 	kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
+	// 	return true
+	// })
 
 	targetIds := kl.Get(new(big.Int).SetBytes(*nodeId))
 	if len(targetIds) == 0 {
@@ -318,35 +523,50 @@ func FindNearInSuper(nodeId, outId *AddressNet, includeSelf bool) *AddressNet {
 
 //在节点中找到最近的节点，包括代理节点
 func FindNearNodeId(nodeId, outId *AddressNet, includeSelf bool) *AddressNet {
-	kl := NewKademlia()
+	kl := NewKademlia(len(nodes) + 1)
 	if includeSelf {
 		kl.Add(new(big.Int).SetBytes(NodeSelf.IdInfo.Id))
 	}
-	outIdStr := ""
-	if outId != nil {
-		outIdStr = outId.B58String()
+	// outIdStr := ""
+	// if outId != nil {
+	// 	outIdStr = utils.Bytes2string(*outId) // outId.B58String()
+	// }
+
+	nodesLock.RLock()
+
+	for _, one := range nodes {
+		if one.Type != Node_type_logic && one.Type != Node_type_proxy && one.Type != Node_type_white_list {
+			continue
+		}
+		if outId != nil && bytes.Equal(one.IdInfo.Id, *outId) {
+			continue
+		}
+		kl.Add(new(big.Int).SetBytes(one.IdInfo.Id))
 	}
-	Nodes.Range(func(k, v interface{}) bool {
-		if k.(string) == outIdStr {
-			return true
-		}
-		value := v.(*Node)
-		kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
-		return true
-	})
-	//代理节点
-	Proxys.Range(func(k, v interface{}) bool {
-		if k.(string) == outIdStr {
-			return true
-		}
-		value := v.(*Node)
-		//过滤APP节点
-		if value.IsApp {
-			return true
-		}
-		kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
-		return true
-	})
+
+	nodesLock.RUnlock()
+
+	// Nodes.Range(func(k, v interface{}) bool {
+	// 	if k.(string) == outIdStr {
+	// 		return true
+	// 	}
+	// 	value := v.(*Node)
+	// 	kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
+	// 	return true
+	// })
+	// //代理节点
+	// Proxys.Range(func(k, v interface{}) bool {
+	// 	if k.(string) == outIdStr {
+	// 		return true
+	// 	}
+	// 	value := v.(*Node)
+	// 	//过滤APP节点
+	// 	if value.IsApp {
+	// 		return true
+	// 	}
+	// 	kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
+	// 	return true
+	// })
 
 	targetIds := kl.Get(new(big.Int).SetBytes(*nodeId))
 	if len(targetIds) == 0 {
@@ -397,21 +617,40 @@ func FindNearNodeId(nodeId, outId *AddressNet, includeSelf bool) *AddressNet {
 //	return Nodes[hex.EncodeToString(targetId.Bytes())]
 //}
 
+/*
+	在连接中获得白名单节点
+*/
+func GetWhiltListNodes() []AddressNet {
+	ids := make([]AddressNet, 0)
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_white_list {
+			continue
+		}
+		ids = append(ids, one.IdInfo.Id)
+	}
+	nodesLock.RUnlock()
+	return ids
+}
+
 //得到所有逻辑节点，不包括本节点，也不包括代理节点
-func GetLogicNodes() []*AddressNet {
-	ids := make([]*AddressNet, 0)
-	Nodes.Range(func(k, v interface{}) bool {
-		value := v.(*Node)
-		ids = append(ids, &value.IdInfo.Id)
-		return true
-	})
+func GetLogicNodes() []AddressNet {
+	ids := make([]AddressNet, 0)
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_logic && one.Type != Node_type_white_list {
+			continue
+		}
+		ids = append(ids, one.IdInfo.Id)
+	}
+	nodesLock.RUnlock()
 	return ids
 }
 
 /*
 	获得所有代理节点
 */
-func GetProxyAll() []*AddressNet {
+func GetProxyAll() []AddressNet {
 	// ids := make([]string, 0)
 	// Proxys.Range(func(key, value interface{}) bool {
 	// 	ids = append(ids, key.(string))
@@ -419,25 +658,88 @@ func GetProxyAll() []*AddressNet {
 	// })
 	// return ids
 
-	ids := make([]*AddressNet, 0)
-	Proxys.Range(func(k, v interface{}) bool {
-		value := v.(*Node)
-		ids = append(ids, &value.IdInfo.Id)
-		return true
-	})
+	ids := make([]AddressNet, 0)
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_proxy {
+			continue
+		}
+		ids = append(ids, one.IdInfo.Id)
+	}
+	nodesLock.RUnlock()
+	// Proxys.Range(func(k, v interface{}) bool {
+	// 	value := v.(*Node)
+	// 	ids = append(ids, value.IdInfo.Id)
+	// 	return true
+	// })
 	return ids
 }
 
 /*
 	获取额外的节点连接
 */
-func GetOtherNodes() []*AddressNet {
-	ids := make([]*AddressNet, 0)
-	OtherNodes.Range(func(k, v interface{}) bool {
-		value := v.(*Node)
-		ids = append(ids, &value.IdInfo.Id)
-		return true
-	})
+// func GetOtherNodes() []AddressNet {
+// 	ids := make([]AddressNet, 0)
+// 	OtherNodes.Range(func(k, v interface{}) bool {
+// 		value := v.(*Node)
+// 		ids = append(ids, value.IdInfo.Id)
+// 		return true
+// 	})
+// 	return ids
+// }
+
+/*
+	添加一个被其他节点当作逻辑节点的连接
+*/
+func AddNodesClient(node Node) {
+	engine.Log.Info("add client nodeid %s", node.IdInfo.Id.B58String())
+	node.Type = Node_type_client
+	nodesLock.Lock()
+	nodes[utils.Bytes2string(node.IdInfo.Id)] = &node
+	nodesLock.Unlock()
+	// NodesClient.Store(utils.Bytes2string(node.IdInfo.Id), &node)
+	select {
+	case HaveNewNode <- &node:
+	default:
+	}
+}
+
+/*
+	将节点转化为逻辑节点
+*/
+// func SwitchNodesClientToLogic(node Node) {
+// 	node.Type = Node_type_super
+// 	engine.Log.Info("SwitchNodesClientToLogic %s", node.IdInfo.Id.B58String())
+// 	nodesLock.Lock()
+// 	nodeLoad, ok := nodes[utils.Bytes2string(node.IdInfo.Id)]
+// 	if ok {
+// 		nodeLoad.Type = Node_type_super
+// 	} else {
+// 		nodes[utils.Bytes2string(node.IdInfo.Id)] = &node
+// 	}
+// 	nodesLock.Unlock()
+// 	// NodesClient.Delete(utils.Bytes2string(node.IdInfo.Id))
+// 	// Nodes.Store(utils.Bytes2string(node.IdInfo.Id), &node)
+// }
+
+/*
+	获取本机被其他当作逻辑节点的连接
+*/
+func GetNodesClient() []AddressNet {
+	ids := make([]AddressNet, 0)
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_client {
+			continue
+		}
+		ids = append(ids, one.IdInfo.Id)
+	}
+	nodesLock.RUnlock()
+	// NodesClient.Range(func(k, v interface{}) bool {
+	// 	value := v.(*Node)
+	// 	ids = append(ids, value.IdInfo.Id)
+	// 	return true
+	// })
 	return ids
 }
 
@@ -446,11 +748,21 @@ func GetOtherNodes() []*AddressNet {
 */
 func GetSuperNodeIps() (ips []string) {
 	ips = make([]string, 0)
-	Nodes.Range(func(k, v interface{}) bool {
-		value := v.(*Node)
-		ips = append(ips, value.Addr+":"+strconv.Itoa(int(value.TcpPort)))
-		return true
-	})
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_logic && one.Type != Node_type_white_list {
+			continue
+		}
+		// ids = append(ids, one.IdInfo.Id)
+		ips = append(ips, one.Addr+":"+strconv.Itoa(int(one.TcpPort)))
+	}
+	nodesLock.RUnlock()
+
+	// Nodes.Range(func(k, v interface{}) bool {
+	// 	value := v.(*Node)
+	// 	ips = append(ips, value.Addr+":"+strconv.Itoa(int(value.TcpPort)))
+	// 	return true
+	// })
 
 	return
 }
@@ -465,23 +777,71 @@ func CheckNeedNode(nodeId *AddressNet) (isNeed bool) {
 		2.计算两个节点是否在同一个网络
 		3.若在同一个网络，计算谁的值最小
 	*/
+
 	if len(GetLogicNodes()) == 0 {
 		return true
 	}
 	//是本身节点不添加
-	// if nodeId.B58String() == NodeSelf.IdInfo.Id.B58String() {
 	if bytes.Equal(*nodeId, NodeSelf.IdInfo.Id) {
-		//		fmt.Println("2不添加")
 		return false
 	}
 
 	ids := NewIds(NodeSelf.IdInfo.Id, NodeIdLevel)
 	for _, one := range GetLogicNodes() {
-		ids.AddId(*one)
+		ids.AddId(one)
 	}
 	ok, _ := ids.AddId(*nodeId)
 	return ok
+}
 
+/*
+	检查连接到本机的节点是否可以作为逻辑节点
+*/
+func CheckClientNodeIsLogicNode() {
+	nodesLock.Lock()
+	for _, one := range nodes {
+		if one.Type != Node_type_client {
+			continue
+		}
+		//是本身节点不添加
+		if bytes.Equal(one.IdInfo.Id, NodeSelf.IdInfo.Id) {
+			continue
+		}
+		//在白名单中
+		if FindWhiteList(&one.IdInfo.Id) {
+			one.Type = Node_type_white_list
+			continue
+		}
+
+		logicNodes := make([]AddressNet, 0)
+		for _, two := range nodes {
+			if two.Type != Node_type_logic {
+				continue
+			}
+			logicNodes = append(logicNodes, two.IdInfo.Id)
+		}
+		//检查是否需要
+		if len(logicNodes) == 0 {
+			one.Type = Node_type_logic
+			continue
+		}
+
+		ids := NewIds(NodeSelf.IdInfo.Id, NodeIdLevel)
+		for _, two := range logicNodes {
+			ids.AddId(two)
+		}
+		ok, _ := ids.AddId(one.IdInfo.Id)
+		if ok {
+			one.Type = Node_type_logic
+		}
+	}
+	nodesLock.Unlock()
+	// for _, one := range clientNodes {
+	// 	if nodeStore.CheckNeedNode(&one) {
+	// 		node := nodeStore.FindNode(&one)
+	// 		nodeStore.SwitchNodesClientToLogic(*node)
+	// 	}
+	// }
 }
 
 type LogicNumBuider struct {
@@ -590,21 +950,30 @@ func NewLogicNumBuider(id []byte, level uint) *LogicNumBuider {
 /*
 	获得一个节点更远的节点中，比自己更远的节点
 */
-func GetIdsForFar(id *AddressNet) []*AddressNet {
+func GetIdsForFar(id *AddressNet) []AddressNet {
 	//计算来源的逻辑节点地址
-	kl := NewKademlia()
+	kl := NewKademlia(len(nodes) + 2)
 	kl.Add(new(big.Int).SetBytes(NodeSelf.IdInfo.Id))
 	kl.Add(new(big.Int).SetBytes(*id))
 
-	Nodes.Range(func(k, v interface{}) bool {
-		value := v.(*Node)
-		kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
-		return true
-	})
+	nodesLock.RLock()
+	for _, one := range nodes {
+		if one.Type != Node_type_logic && one.Type != Node_type_white_list {
+			continue
+		}
+		kl.Add(new(big.Int).SetBytes(one.IdInfo.Id))
+	}
+	nodesLock.RUnlock()
+
+	// Nodes.Range(func(k, v interface{}) bool {
+	// 	value := v.(*Node)
+	// 	kl.Add(new(big.Int).SetBytes(value.IdInfo.Id))
+	// 	return true
+	// })
 
 	list := kl.Get(new(big.Int).SetBytes(*id))
 
-	out := make([]*AddressNet, 0)
+	out := make([]AddressNet, 0)
 	find := false
 	for _, one := range list {
 
@@ -620,11 +989,48 @@ func GetIdsForFar(id *AddressNet) []*AddressNet {
 				// }
 				// mh := utils.Multihash(bs)
 				mh := AddressNet(one.Bytes())
-				out = append(out, &mh)
+				out = append(out, mh)
 			}
 		}
 
 	}
 
 	return out
+}
+
+/*
+	添加一个地址到白名单
+*/
+func AddWhiteList(addr AddressNet) {
+	WhiteList.Store(utils.Bytes2string(addr), 0)
+}
+
+func DelWhiteList(addr AddressNet) {
+	// WhiteList.Delete()
+	WhiteList.Delete(utils.Bytes2string(addr))
+}
+
+func FindWhiteList(addr *AddressNet) bool {
+	_, ok := WhiteList.Load(utils.Bytes2string(*addr))
+	return ok
+}
+
+func init() {
+	p1 := "2w5QBfujmLTAvesJRyRpxZFj4D4PJTEbhDVQJt1kbDmk"
+	AddWhiteList(AddressFromB58String(p1))
+	p5 := "DNDywcPsJqsWq2gn7gH4yZg5GrAZbR5JvbpxoJDhyoAs"
+	AddWhiteList(AddressFromB58String(p5))
+	p6 := "5EontzaTP7Ad8ZQS9GviPQfZMVNMEFh5RMDhYUgZuSqB"
+	AddWhiteList(AddressFromB58String(p6))
+	p7 := "XXmf5vZZ7Nf7XbZsf1YN9hW2KdoKsQqyPMvpPGaxLo6"
+	AddWhiteList(AddressFromB58String(p7))
+	p8 := "GxCcAvSNRzymqyrRtcXFt9Mz829gFwnZ5TRNBA5Nz2Co"
+	AddWhiteList(AddressFromB58String(p8))
+
+	testp1 := "1E1ZBndCZsVDt1QXkk2gy4CTeh2sEQeVKvv7L3mP14S"
+	AddWhiteList(AddressFromB58String(testp1))
+	testp2 := "j9vydTsmTyC7hx6LmNUXYDtge2R4vhaggotVUF7oCPX"
+	AddWhiteList(AddressFromB58String(testp2))
+	testp3 := "6RKLimMBb9h2SdXuXooQTgycNdYEVcakxCsMQoWQpy7c"
+	AddWhiteList(AddressFromB58String(testp3))
 }

@@ -2,7 +2,6 @@ package rpc
 
 import (
 	"mandela/rpc/model"
-	"encoding/json"
 	"fmt"
 	"net/http"
 )

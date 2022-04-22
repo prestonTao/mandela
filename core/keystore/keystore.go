@@ -4,8 +4,9 @@ import (
 	"mandela/core/utils"
 	"mandela/core/utils/crypto"
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"io"
 	"io/ioutil"
@@ -54,10 +55,22 @@ func (this *Keystore) Load() error {
 		return errors.New("Damaged wallet file: the number of wallets is 0")
 	}
 	for i, _ := range this.Wallets {
-		this.Wallets[i].lock = new(sync.RWMutex)
-		if !this.Wallets[i].CheckIntact() {
+		walletOne := this.Wallets[i]
+		walletOne.lock = new(sync.RWMutex)
+		walletOne.addrMap = new(sync.Map)
+		walletOne.pukMap = new(sync.Map)
+		if !walletOne.CheckIntact() {
 			//钱包文件损坏:第" + strconv.Itoa(i+1) + "个钱包不完整
 			return errors.New("Damaged wallet file: No" + strconv.Itoa(i+1) + "Wallet incomplete")
+		}
+		for j, one := range walletOne.Addrs {
+			addrInfo := walletOne.Addrs[j]
+			addrStr := one.Addr.B58String()
+			addrInfo.AddrStr = addrStr
+
+			walletOne.addrMap.Store(addrStr, addrInfo)
+			walletOne.pukMap.Store(hex.EncodeToString(one.Puk), addrInfo)
+
 		}
 	}
 	return nil
@@ -138,6 +151,18 @@ func (this *Keystore) CreateNewWalletRand(rand1, rand2 []byte, password [32]byte
 /*
 	获取地址列表
 */
-func (this *Keystore) GetAddr() (addrs []crypto.AddressCoin) {
+func (this *Keystore) GetAddr() (addrs []*AddressInfo) {
 	return this.Wallets[this.Coinbase].GetAddr()
+}
+
+/*
+	获取网络地址
+*/
+func (this *Keystore) GetNetAddrPuk(password string) (prk ed25519.PrivateKey, puk ed25519.PublicKey, err error) {
+	pwd := sha256.Sum256([]byte(password))
+	wallet := this.Wallets[this.Coinbase]
+	addr := wallet.GetCoinbase()
+	// addr := this.GetCoinbase()
+	_, prk, puk, err = wallet.GetKeyByAddr(addr.Addr, pwd)
+	return
 }

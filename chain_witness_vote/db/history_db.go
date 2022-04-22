@@ -9,5 +9,6 @@ package db
 	保存一个历史交易纪录
 */
 func SaveHistory(id []byte, bs *[]byte) error {
-	return db.Put(id, *bs, nil)
+	return LevelTempDB.Save(id, bs)
+	// return db.Put(id, *bs, nil)
 }

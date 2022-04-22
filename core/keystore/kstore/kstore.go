@@ -7,12 +7,14 @@ import (
 	"mandela/core/utils/crypto"
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/mr-tron/base58"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type KStore struct {
 	Path    string

@@ -1,0 +1,27 @@
+2021/10/17 16:38:06.409 [D] [engine.go:28]  register message id 1
+2021/10/17 16:38:06.410 [D] [engine.go:28]  register message id 2
+2021/10/17 16:38:06.410 [D] [engine.go:28]  register message id 3
+2021/10/17 16:38:06.411 [D] [engine.go:28]  register message id 4
+2021/10/17 16:38:06.412 [D] [engine.go:28]  register message id 5
+2021/10/17 16:38:06.412 [D] [engine.go:28]  register message id 6
+2021/10/17 16:38:06.413 [D] [engine.go:28]  register message id 7
+2021/10/17 16:38:06.413 [D] [engine.go:28]  register message id 8
+2021/10/17 16:38:06.417 [D] [engine.go:45]  Listen to an IP：0.0.0.0:19981
+2021/10/17 16:38:06.417 [I] [common.go:22]  Try connecting nodes to see if they are online 192.168.28.209:19981
+2021/10/17 16:38:06.419 [D] [manager.go:202]  self node 192.168.28.209 19981 192.168.28.209 19981
+2021/10/17 16:38:06.419 [W] [engine.go:88]  Accept connection error EOF
+2021/10/17 16:39:59.150 [D] [engine.go:28]  register message id 1
+2021/10/17 16:39:59.245 [D] [engine.go:28]  register message id 2
+2021/10/17 16:39:59.246 [D] [engine.go:28]  register message id 3
+2021/10/17 16:39:59.247 [D] [engine.go:28]  register message id 4
+2021/10/17 16:39:59.247 [D] [engine.go:28]  register message id 5
+2021/10/17 16:39:59.248 [D] [engine.go:28]  register message id 6
+2021/10/17 16:39:59.248 [D] [engine.go:28]  register message id 7
+2021/10/17 16:39:59.253 [D] [engine.go:28]  register message id 8
+2021/10/17 16:39:59.262 [D] [engine.go:45]  Listen to an IP：0.0.0.0:19981
+2021/10/17 16:39:59.317 [I] [common.go:22]  Try connecting nodes to see if they are online 192.168.28.209:19981
+2021/10/17 16:39:59.321 [D] [manager.go:202]  self node 192.168.28.209 19981 192.168.28.209 19981
+2021/10/17 16:39:59.321 [W] [engine.go:88]  Accept connection error EOF
+2021/10/17 16:40:09.328 [I] [common.go:22]  Try connecting nodes to see if they are online 192.168.28.209:19981
+2021/10/17 16:40:09.330 [W] [engine.go:88]  Accept connection error EOF
+2021/10/17 16:40:09.330 [D] [manager.go:202]  self node 192.168.28.209 19981 192.168.28.209 19981

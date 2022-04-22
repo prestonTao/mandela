@@ -1,19 +1,22 @@
 package anonymousnet
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"mandela/chain_witness_vote/mining"
 	"mandela/chain_witness_vote/mining/name"
 	"mandela/core/nodeStore"
+	"bytes"
+	"fmt"
+
 	"mandela/proxyhttp"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/astaxie/beego"
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 type MainController struct {
 	beego.Controller
@@ -33,7 +36,7 @@ func (this *MainController) Agent() {
 
 	//	fmt.Println("uri", this.Ctx.Request.RequestURI)
 
-	// fmt.Println("请求地址", url)
+	fmt.Println("请求地址", url)
 
 	temp := strings.SplitN(url, "/", 2)
 	url = "/" + url
@@ -65,6 +68,11 @@ func (this *MainController) Agent() {
 	}
 
 	fmt.Println("找到的节点id是", targetMhId.B58String())
+
+	//预防一般请求地址。例如：system_api.php
+	if targetMhId.B58String() == "" {
+		return
+	}
 
 	id = nodeStore.NewTempId(targetMhId, targetMhId)
 
@@ -237,5 +245,5 @@ func (this *MainController) Agent() {
 	代理
 */
 func (this *MainController) AgentToo() {
-	// fmt.Println("没有命中")
+	fmt.Println("没有命中")
 }

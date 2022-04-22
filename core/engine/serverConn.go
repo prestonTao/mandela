@@ -1,17 +1,23 @@
 package engine
 
 import (
-	"encoding/json"
+	"errors"
 	"net"
+	"runtime"
+	"sync"
+	"time"
 )
 
 //其他计算机对本机的连接
 type ServerConn struct {
 	sessionBase
-	conn           net.Conn
-	Ip             string
-	Connected_time string
-	CloseTime      string
+	conn             net.Conn
+	Ip               string
+	Connected_time   string
+	CloseTime        string
+	outChan          chan *[]byte //发送队列
+	outChanCloseLock *sync.Mutex  //是否关闭发送队列
+	outChanIsClose   bool         //是否关闭发送队列。1=关闭
 	// packet         Packet
 	engine     *Engine
 	controller Controller
@@ -20,8 +26,9 @@ type ServerConn struct {
 func (this *ServerConn) run() {
 
 	// this.packet.Session = this
-
+	go this.loopSend()
 	go this.recv()
+
 }
 
 //接收客户端消息协程
@@ -34,12 +41,14 @@ func (this *ServerConn) recv() {
 		var packet *Packet
 		packet, err = RecvPackage(this.conn)
 		if err != nil {
+			// Log.Warn("网络错误 ServerConn %s", err.Error())
+			Log.Warn("network error ServerConn %s", err.Error())
 			break
 		} else {
 			packet.Session = this
 
-			// Log.Debug("conn recv: %d %s %d\n%s", this.packet.MsgID, this.Ip, len(this.packet.Data)+16, hex.EncodeToString(this.packet.Data))
-			//			Log.Debug("conn recv: %d %s %d", packet.MsgID, this.Ip, len(packet.Data)+16)
+			// Log.Debug("conn recv: %d %s %d\n%s", packet.MsgID, this.Ip, len(packet.Data)+len(packet.Dataplus)+16, hex.EncodeToString(append(packet.Data, packet.Dataplus...)))
+			// Log.Debug("server conn recv: %d %s %d", packet.MsgID, this.Ip, len(packet.Data)+len(packet.Dataplus)+16)
 
 			// if packet.IsWait {
 			// 	Log.Debug("开始等待")
@@ -51,7 +60,7 @@ func (this *ServerConn) recv() {
 			// } else {
 			handler = engine.router.GetHandler(packet.MsgID)
 			if handler == nil {
-				Log.Warn("server该消息未注册，消息编号：%d", packet.MsgID)
+				Log.Warn("server The message is not registered, message number：%d", packet.MsgID)
 				//					if this.packet.MsgID == 16 {
 				//						fmt.Println(string(this.packet.Data))
 				//					}
@@ -72,8 +81,44 @@ func (this *ServerConn) recv() {
 
 	//最后一个包接收了之后关闭chan
 	//如果有超时包需要等超时了才关闭，目前未做处理
-	// close(this.outData)
+	this.outChanCloseLock.Lock()
+	this.outChanIsClose = true
+	close(this.outChan)
+	this.outChanCloseLock.Unlock()
 	// fmt.Println("关闭连接")
+}
+
+func (this *ServerConn) loopSend() {
+	var n int
+	var err error
+	var buff *[]byte
+	var isClose = false
+	var count = 5
+	var total = 0
+	for {
+		buff, isClose = <-this.outChan
+		if !isClose {
+			Log.Warn("out chan is close")
+			break
+		}
+		this.conn.SetWriteDeadline(time.Now().Add(time.Second * 10))
+		n, err = this.conn.Write(*buff)
+		if err != nil {
+			total++
+			Log.Warn("conn send err: %s", err.Error())
+			if total > count {
+				this.conn.Close()
+			}
+		} else {
+			total = 0
+			// Log.Debug("conn send: %d %s %d %d\n%s", msgID, this.conn.RemoteAddr(), len(*buff), n, hex.EncodeToString(*buff))
+			// Log.Debug("client conn send: %d %s %d", msgID, this.conn.RemoteAddr(), len(*buff))
+			// Log.Info("clent send %s", hex.EncodeToString(*buff))
+		}
+		if n < len(*buff) {
+			// Log.Warn("conn send warn: %d %s length %d %d", msgID, this.conn.RemoteAddr().String(), len(*buff), n)
+		}
+	}
 }
 
 // func (this *ServerConn) Waite(du time.Duration) *Packet {
@@ -88,6 +133,11 @@ func (this *ServerConn) recv() {
 // }
 
 func (this *ServerConn) handlerProcess(handler MsgHandler, msg *Packet) {
+	goroutineId := GetRandomDomain() + TimeFormatToNanosecondStr()
+	_, file, line, _ := runtime.Caller(0)
+	AddRuntime(file, line, goroutineId)
+	defer DelRuntime(file, line, goroutineId)
+
 	//消息处理模块报错将不会引起宕机
 	defer PrintPanicStack()
 	//消息处理前先通过拦截器
@@ -109,19 +159,41 @@ func (this *ServerConn) handlerProcess(handler MsgHandler, msg *Packet) {
 
 //给客户端发送数据
 func (this *ServerConn) Send(msgID uint64, data, dataplus *[]byte, waite bool) (err error) {
-	defer PrintPanicStack()
-	// this.packet.IsWait = waite
-	buff := MarshalPacket(msgID, data, dataplus)
-	//	var n int
-	_, err = this.conn.Write(*buff)
-	if err != nil {
-		Log.Warn("conn send err: %s", err.Error())
-	} else {
-		//		Log.Debug("conn send: %d %s %d %d", msgID, this.Ip, len(*buff), n)
-		// Log.Debug("conn send: %d %s %d %d\n%s", msgID, this.Ip, len(*buff), n, hex.EncodeToString(*buff))
+	this.outChanCloseLock.Lock()
+	if this.outChanIsClose {
+		this.outChanCloseLock.Unlock()
+		return errors.New("send channel is close")
 	}
+	buff := MarshalPacket(msgID, data, dataplus)
+	select {
+	case this.outChan <- buff:
+	default:
+		addr := AddressNet([]byte(this.GetName()))
+		Log.Warn("conn send err chan is full :%s", addr.B58String())
+		this.conn.Close()
+	}
+	this.outChanCloseLock.Unlock()
 	return
 }
+
+//给客户端发送数据
+// func (this *ServerConn) Send(msgID uint64, data, dataplus *[]byte, waite bool) (err error) {
+// 	defer PrintPanicStack()
+// 	// this.packet.IsWait = waite
+// 	buff := MarshalPacket(msgID, data, dataplus)
+// 	var n int
+// 	n, err = this.conn.Write(*buff)
+// 	if err != nil {
+// 		Log.Warn("conn send err: %s", err.Error())
+// 	} else {
+// 		// Log.Debug("conn send: %d %s %d %d\n%s", msgID, this.Ip, len(buff), n, hex.EncodeToString(buff))
+// 		// Log.Debug("server conn send: %d %s %d", msgID, this.conn.RemoteAddr(), len(*buff))
+// 	}
+// 	if n < len(*buff) {
+// 		Log.Warn("conn send warn: %d %s length %d %d", msgID, this.conn.RemoteAddr().String(), len(*buff), n)
+// 	}
+// 	return
+// }
 
 //给客户端发送数据
 func (this *ServerConn) SendJSON(msgID uint64, data interface{}, waite bool) (err error) {
@@ -139,6 +211,7 @@ func (this *ServerConn) SendJSON(msgID uint64, data interface{}, waite bool) (er
 
 //关闭这个连接
 func (this *ServerConn) Close() {
+	Log.Info("Close session ServerConn")
 	if this.engine.closecallback != nil {
 		this.engine.closecallback(this.GetName())
 	}

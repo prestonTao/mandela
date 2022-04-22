@@ -51,6 +51,9 @@ func NewCache(maxEntries int) *Cache {
 
 // Add adds a value to the cache.
 func (c *Cache) Add(key Key, value interface{}) {
+	if value == nil {
+		return
+	}
 	if c.cache == nil {
 		c.cache = make(map[interface{}]*list.Element)
 		c.ll = list.New()
@@ -102,6 +105,9 @@ func (c *Cache) RemoveOldest() {
 
 func (c *Cache) removeElement(e *list.Element) {
 	c.ll.Remove(e)
+	if e.Value == nil {
+		return
+	}
 	kv := e.Value.(*entry)
 	delete(c.cache, kv.key)
 	if c.OnEvicted != nil {

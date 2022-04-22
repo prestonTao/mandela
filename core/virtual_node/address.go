@@ -30,9 +30,9 @@ func AddressFromB58String(str string) AddressNetExtend {
 	通过公钥生成网络节点地址，将公钥两次hash得到网络节点地址
 	@version    []byte    版本号（如比特币主网版本号“0x00"）
 */
-func BuildAddr(addr nodeStore.AddressNet, index uint64) AddressNetExtend {
+func BuildAddrNetExtend(addr nodeStore.AddressNet, index uint64) AddressNetExtend {
 	bs := []byte(addr)
-	binary.BigEndian.PutUint64(bs, index)
+	binary.LittleEndian.PutUint64(bs, index)
 
 	//计算SHA-256哈希值
 	hashAddr := sha256.Sum256(bs)
@@ -48,7 +48,7 @@ func CheckPukAddr(addr nodeStore.AddressNet, index uint64, addrEx AddressNetExte
 	if addr == nil {
 		return false
 	}
-	tagAddr := BuildAddr(addr, index)
+	tagAddr := BuildAddrNetExtend(addr, index)
 	return bytes.Equal(tagAddr, addrEx)
 }
 

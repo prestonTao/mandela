@@ -4,15 +4,19 @@ import (
 	"mandela/chain_witness_vote/db"
 	"mandela/chain_witness_vote/mining"
 	"mandela/config"
+	"mandela/core/engine"
 	"mandela/core/keystore"
 	"mandela/core/utils"
 	"mandela/core/utils/crypto"
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
+	"encoding/hex"
 
+	// jsoniter "github.com/json-iterator/go"
 	"golang.org/x/crypto/ed25519"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	交押金，注册一个域名
@@ -48,6 +52,9 @@ func (this *Tx_account) GetVOJSON() interface{} {
 	构建hash值得到交易id
 */
 func (this *Tx_account) BuildHash() {
+	if this.Hash != nil && len(this.Hash) > 0 {
+		return
+	}
 	bs := this.Serialize()
 
 	// *bs = append(*bs, this.Account...)
@@ -61,13 +68,13 @@ func (this *Tx_account) BuildHash() {
 /*
 	格式化成json字符串
 */
-func (this *Tx_account) Json() (*[]byte, error) {
-	bs, err := json.Marshal(this)
-	if err != nil {
-		return nil, err
-	}
-	return &bs, err
-}
+// func (this *Tx_account) Json() (*[]byte, error) {
+// 	bs, err := json.Marshal(this)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &bs, err
+// }
 
 /*
 	格式化成json字符串
@@ -84,17 +91,28 @@ func (this *Tx_account) Serialize() *[]byte {
 	获取签名
 */
 func (this *Tx_account) GetSign(key *ed25519.PrivateKey, txid []byte, voutIndex, vinIndex uint64) *[]byte {
-	bs, err := db.Find(txid)
+	txItr, err := mining.LoadTxBase(txid)
+	// txItr, err := mining.FindTxBase(txid)
+
 	if err != nil {
 		return nil
 	}
-	txItr, err := mining.ParseTxBase(bs)
-	if err != nil {
+
+	blockhash, err := db.GetTxToBlockHash(&txid)
+	if err != nil || blockhash == nil {
 		return nil
 	}
+
+	// if txItr.GetBlockHash() == nil {
+	// 	txItr = mining.GetRemoteTxAndSave(txid)
+	// 	if txItr.GetBlockHash() == nil {
+	// 		return nil
+	// 	}
+	// }
 	buf := bytes.NewBuffer(nil)
 	//上一个交易 所属的区块hash
-	buf.Write(*txItr.GetBlockHash())
+	buf.Write(*blockhash)
+	// buf.Write(*txItr.GetBlockHash())
 	//上一个交易的hash
 	buf.Write(*txItr.GetHash())
 	//上一个交易的指定输出序列化
@@ -117,19 +135,30 @@ func (this *Tx_account) GetSign(key *ed25519.PrivateKey, txid []byte, voutIndex,
 	检查交易是否合法
 */
 func (this *Tx_account) Check() error {
-	// this.TxBase.CheckBase()
+
+	//判断vin是否太多
+	// if len(this.Vin) > config.Mining_pay_vin_max {
+	// 	return config.ERROR_pay_vin_too_much
+	// }
 
 	oldTxClass := uint64(config.Wallet_tx_type_mining)
 	//
 	//1.检查输入签名是否正确，2.检查输入输出是否对等，还有手续费
 	inTotal := uint64(0)
 	for i, one := range this.Vin {
-		txbs, err := db.Find(one.Txid)
+		txItr, err := mining.LoadTxBase(one.Txid)
+		// txItr, err := mining.FindTxBase(one.Txid)
+		// txbs, err := db.Find(one.Txid)
+		// if err != nil {
+		// 	return config.ERROR_tx_not_exist
+		// }
+		// txItr, err := mining.ParseTxBase(mining.ParseTxClass(one.Txid), txbs)
 		if err != nil {
-			return config.ERROR_tx_not_exist
+			return config.ERROR_tx_format_fail
 		}
-		txItr, err := mining.ParseTxBase(txbs)
-		if err != nil {
+
+		blockhash, err := db.GetTxToBlockHash(&one.Txid)
+		if err != nil || blockhash == nil {
 			return config.ERROR_tx_format_fail
 		}
 
@@ -140,21 +169,22 @@ func (this *Tx_account) Check() error {
 
 		vout := (*txItr.GetVout())[one.Vout]
 		//如果这个交易已经被使用，则验证不通过，否则会出现双花问题。
-		if vout.Tx != nil {
-			return config.ERROR_tx_is_use
-		}
+		// if vout.Tx != nil {
+		// 	return config.ERROR_tx_is_use
+		// }
 		inTotal = inTotal + vout.Value
 
 		//验证公钥是否和地址对应
 		addr := crypto.BuildAddr(config.AddrPre, one.Puk)
 		if !bytes.Equal(addr, (*txItr.GetVout())[one.Vout].Address) {
-			return config.ERROR_sign_fail
+			return config.ERROR_public_and_addr_notMatch
 		}
 
 		//验证签名
 		buf := bytes.NewBuffer(nil)
 		//上一个交易 所属的区块hash
-		buf.Write(*txItr.GetBlockHash())
+		buf.Write(*blockhash)
+		// buf.Write(*txItr.GetBlockHash())
 		//上一个交易的hash
 		buf.Write(*txItr.GetHash())
 		//上一个交易的指定输出序列化
@@ -166,6 +196,9 @@ func (this *Tx_account) Check() error {
 		// *sign = append(*sign, this.Account...)
 
 		puk := ed25519.PublicKey(one.Puk)
+		if config.Wallet_print_serialize_hex {
+			engine.Log.Info("sign serialize:%s", hex.EncodeToString(*sign))
+		}
 		if !ed25519.Verify(puk, *sign, one.Sign) {
 			return config.ERROR_sign_fail
 		}
@@ -174,10 +207,6 @@ func (this *Tx_account) Check() error {
 	if this.Type == config.Wallet_tx_type_account_cancel && oldTxClass == config.Wallet_tx_type_account {
 		return nil
 	}
-
-	// //确认是本人取消
-
-	//还要检查域名是否属于那个人
 
 	return config.ERROR_tx_fail
 }
@@ -200,8 +229,69 @@ func (this *Tx_account) GetWitness() *crypto.AddressCoin {
 */
 func (this *Tx_account) CheckRepeatedTx(txs ...mining.TxItr) bool {
 	//判断双花
-	if !this.MultipleExpenditures(txs...) {
-		return false
-	}
+	// if !this.MultipleExpenditures(txs...) {
+	// 	return false
+	// }
 	return true
+}
+
+/*
+	统计交易余额
+*/
+func (this *Tx_account) CountTxItems(height uint64) *mining.TxItemCount {
+	itemCount := mining.TxItemCount{
+		Additems: make([]*mining.TxItem, 0),
+		SubItems: make([]*mining.TxSubItems, 0),
+	}
+	//将之前的UTXO标记为已经使用，余额中减去。
+	for _, vin := range this.Vin {
+		// engine.Log.Info("查看vin中的状态 %d", vin.PukIsSelf)
+		ok := vin.CheckIsSelf()
+		if !ok {
+			continue
+		}
+		// engine.Log.Info("统单易1耗时 %s %s", txItr.GetHashStr(), time.Now().Sub(start))
+		//查找这个地址的余额列表，没有则创建一个
+		itemCount.SubItems = append(itemCount.SubItems, &mining.TxSubItems{
+			Txid:      vin.Txid, //utils.Bytes2string(vin.Txid), //  vin.GetTxidStr(),
+			VoutIndex: vin.Vout,
+			Addr:      *vin.GetPukToAddr(), // utils.Bytes2string(*vin.GetPukToAddr()), // vin.GetPukToAddrStr(),
+		})
+	}
+
+	//生成新的UTXO收益，保存到列表中
+	for voutIndex, vout := range this.Vout {
+		// if voutIndex == 0 {
+		// 	continue
+		// }
+		//找出需要统计余额的地址
+		//和自己无关的地址
+		ok := vout.CheckIsSelf()
+		if !ok {
+			continue
+		}
+
+		// engine.Log.Info("统单易5耗时 %s %s", txItr.GetHashStr(), time.Now().Sub(start))
+		txItem := mining.TxItem{
+			Addr: &(this.Vout)[voutIndex].Address, //  &vout.Address,
+			// AddrStr: vout.GetAddrStr(),                      //
+			Value: vout.Value,      //余额
+			Txid:  *this.GetHash(), //交易id
+			// TxidStr:      txHashStr,                              //
+			VoutIndex:    uint64(voutIndex), //交易输出index，从0开始
+			Height:       height,            //
+			LockupHeight: vout.FrozenHeight, //锁仓高度
+		}
+
+		//计入余额列表
+		// this.notspentBalance.AddTxItem(txItem)
+		itemCount.Additems = append(itemCount.Additems, &txItem)
+
+		//保存到缓存
+		// engine.Log.Info("开始统计交易余额 区块高度 %d 保存到缓存", bhvo.BH.Height)
+		// TxCache.AddTxInTxItem(txHashStr, txItr)
+		mining.TxCache.AddTxInTxItem(*this.GetHash(), this)
+
+	}
+	return &itemCount
 }

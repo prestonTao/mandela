@@ -1,0 +1,16 @@
+{
+"netid":1,
+"ip":"192.168.28.150",
+"port":19981,
+"WebAddr":"120.76.97.101",
+"WebPort":2080,
+"WebStatic":"./static",
+"WebViews":"./views",
+"RpcServer":true,
+"RpcUser":"witness",
+"RpcPassword":"witnessp",
+"miner":true,
+"NetType":"not release",
+"AddrPre":"MMS",
+"end":0
+}

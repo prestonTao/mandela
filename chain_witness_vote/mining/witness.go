@@ -1,8 +1,6 @@
 package mining
 
 import (
-	"mandela/chain_witness_vote/db"
-	"mandela/chain_witness_vote/mining/name"
 	"mandela/config"
 	"mandela/core/engine"
 	"mandela/core/keystore"
@@ -13,10 +11,11 @@ import (
 	"mandela/core/utils/crypto"
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"math/big"
+	"runtime"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,13 +44,15 @@ func NewWitnessChain(wb *WitnessBackup, chain *Chain) *WitnessChain {
 	见证人组
 */
 type WitnessGroup struct {
-	Task       bool          //是否已经定时出块
-	PreGroup   *WitnessGroup //上一个组
-	NextGroup  *WitnessGroup //下一个组
-	Height     uint64        //见证人组高度
-	Witness    []*Witness    //本组见证人列表
-	BlockGroup *Group        //构建出来的合法区块组，为空则是没有合法组
-	tag        bool          //备用见证人队列标记，一次从备用见证人评选出来的备用见证人为一个队列标记，需要保证备用见证人组中有两个队列
+	Task         bool          //是否已经定时出块
+	PreGroup     *WitnessGroup //上一个组
+	NextGroup    *WitnessGroup //下一个组
+	Height       uint64        //见证人组高度
+	Witness      []*Witness    //本组见证人列表
+	BlockGroup   *Group        //构建出来的合法区块组，为空则是没有合法组
+	IsBuildGroup bool          //是否已经构建这个组
+	tag          bool          //备用见证人队列标记，一次从备用见证人评选出来的备用见证人为一个队列标记，需要保证备用见证人组中有两个队列
+	IsCount      bool          //是否已经统计本组合法区块中的交易。
 	// check      bool          //这个见证人组是否多半人出块，多半人出块则合法有效
 }
 
@@ -78,39 +79,104 @@ type Witness struct {
 	// GroupStart         bool                //一个见证人组的首个见证人，首个见证人要分配奖励
 	CheckIsMining bool       //检查是否已经验证出块标记，用于多次未出块的见证人，踢出列表
 	syncBlockOnce *sync.Once //定时同步区块，只执行一次
+	// txCache       *utils.Cache //
+}
+
+/*
+	构建指定高度组之前的所有区块组，包括指定高度
+	@groupHeight    uint64    组高度
+*/
+func (this *WitnessChain) BuildBlockGroupForGroupHeight(groupHeight uint64, blockhash *[]byte) {
+	// engine.Log.Info("构建之前的区块 ----------------- %d", groupHeight)
+	engine.Log.Info("Blocks before construction ----------------- %d", groupHeight)
+	// engine.Log.Info("构建组之前的当前出块组 %d", this.witnessGroup.Height)
+	engine.Log.Info("Current outgoing block group before building group %d", this.witnessGroup.Height)
+	//找到参数指定组高度
+	currentGroup := this.witnessGroup
+	for currentGroup != nil {
+		if currentGroup.Height < groupHeight {
+			// engine.Log.Info("设置已出的块 333333333333333333 %d", group.Height)
+			if currentGroup.NextGroup == nil {
+				// engine.Log.Info("11111111111")
+				break
+			}
+			currentGroup = currentGroup.NextGroup
+			continue
+		}
+		if currentGroup.Height > groupHeight {
+			// engine.Log.Info("设置已出的块 333333333333333333 %d", group.Height)
+			if currentGroup.PreGroup == nil {
+				// engine.Log.Info("2222222222222")
+				return
+			}
+			currentGroup = currentGroup.PreGroup
+			continue
+		}
+		if currentGroup.Height == groupHeight {
+			break
+		}
+	}
+	// engine.Log.Info("找到的组高度 %d", currentGroup.Height)
+	engine.Log.Info("Group height found %d", currentGroup.Height)
+
+	//从当前出块的组开始统计，一直统计到跳过之后的组
+	for {
+		// engine.Log.Info("当前见证人组高度 %d %d", this.witnessGroup.Height, currentGroup.Height)
+		engine.Log.Info("Current witness group height %d %d", this.witnessGroup.Height, currentGroup.Height)
+		if (this.witnessGroup.Height > currentGroup.Height) || (this.witnessGroup.NextGroup == nil) {
+			break
+		}
+		this.witnessGroup.BuildGroup(blockhash)
+		this.chain.CountBlock(this.witnessGroup)
+		// engine.Log.Info("移动高度3333333333333333 %d", this.witnessGroup.Height)
+		this.witnessGroup = this.witnessGroup.NextGroup
+
+		// if this.witnessGroup.Height >= currentGroup.Height {
+		// 	break
+		// }
+	}
+	// engine.Log.Info("构建组之后的当前出块组 %d", this.witnessGroup.Height)
+	engine.Log.Info("Current outgoing block group after building group %d", this.witnessGroup.Height)
+
 }
 
 /*
 	将见证人组中出的块构建为区块组
 */
-func (this *WitnessChain) BuildBlockGroup(bhvo *BlockHeadVO) {
-	engine.Log.Info("Height of block group constructed this time %d", bhvo.BH.GroupHeight)
+func (this *WitnessChain) BuildBlockGroup(bhvo *BlockHeadVO, preWitness *Witness) {
+	// engine.Log.Info("Height of block group constructed this time %d", bhvo.BH.GroupHeight)
+
+	// start := time.Now()
 
 	if bhvo.BH.GroupHeight == config.Mining_group_start_height {
-		this.witnessGroup.BuildGroup()
-		this.BuildWitnessGroup(false)
-		// fmt.Println("下一个见证人是否为空", this.witnessGroup.NextGroup)
+		this.witnessGroup.BuildGroup(nil)
+		this.BuildWitnessGroup(false, false)
 		this.witnessGroup = this.witnessGroup.NextGroup
-		this.BuildWitnessGroup(false)
+		this.BuildWitnessGroup(false, true)
 		return
 	}
-
-	//先判断时间，是否应该构建前面的区块组
+	// engine.Log.Info("构建区块组 111 耗时 %s", time.Now().Sub(start))
+	if preWitness == nil {
+		engine.Log.Info("not find pre witness!")
+		return
+	}
+	//查询当前出块的见证人
 	witness, _ := this.FindWitnessForBlock(bhvo)
 	if witness == nil {
 		return
 	}
 
+	//---新版本统计-----------------
+	// engine.Log.Info("构建区块组 222 耗时 %s", time.Now().Sub(start))
+	isNewGroup := false
 	//是新的组出块，则构建前面的组
-	for i := this.witnessGroup.Height; i < bhvo.BH.GroupHeight; i++ {
-
-		// engine.Log.Info("本次构建的区块组高度   222222222222222 %d", i)
-
-		wg := this.witnessGroup.BuildGroup()
-
-		//找到上一组到本组的见证人组，开始查找没有出块的见证人
-		if wg != nil {
-			for tempGroup := wg; tempGroup != nil && tempGroup.Height < i; tempGroup = tempGroup.NextGroup {
+	if bhvo.BH.GroupHeight != preWitness.Group.Height {
+		isNewGroup = true
+		if bhvo.BH.Height < config.FixBuildGroupBUGHeightMax {
+			preWitness.Group.BuildGroup(&bhvo.BH.Previousblockhash)
+			wg := preWitness.Group.BuildGroup(&bhvo.BH.Previousblockhash)
+			//找到上一组到本组的见证人组，开始查找没有出块的见证人
+			if wg != nil {
 				for _, one := range wg.Witness {
 					if !one.CheckIsMining {
 						if one.Block == nil {
@@ -122,57 +188,110 @@ func (this *WitnessChain) BuildBlockGroup(bhvo *BlockHeadVO) {
 					}
 				}
 			}
+			this.chain.CountBlock(preWitness.Group)
 		}
-
-		this.chain.CountBlock()
-
+		// engine.Log.Info("构建区块组 555 耗时 %s", time.Now().Sub(start))
 		if bhvo.BH.GroupHeight != config.Mining_group_start_height+1 {
-			// engine.Log.Info("本次构建的区块组高度   3333333333333333 %d", i)
-			this.witnessGroup = this.witnessGroup.NextGroup
+			this.witnessGroup = witness.Group
 		}
-		//构建一个新的见证人组
-		this.BuildWitnessGroup(false)
-
 	}
+	this.BuildWitnessGroup(false, isNewGroup)
+
+	//----下面的代码是以前的版本-------------------------------
+	// isNewGroup := false
+	// //是新的组出块，则构建前面的组
+	// for i := this.witnessGroup.Height; i < bhvo.BH.GroupHeight; i++ {
+	// 	isNewGroup = true
+	// 	// engine.Log.Info("本次构建的区块组高度   222222222222222 %d", i)
+	// 	// engine.Log.Info("构建区块组 333 耗时 %s", time.Now().Sub(start))
+
+	// 	wg := this.witnessGroup.BuildGroup(&bhvo.BH.Previousblockhash)
+
+	// 	//找到上一组到本组的见证人组，开始查找没有出块的见证人
+	// 	if wg != nil {
+	// 		for tempGroup := wg; tempGroup != nil && tempGroup.Height < i; tempGroup = tempGroup.NextGroup {
+	// 			for _, one := range wg.Witness {
+	// 				if !one.CheckIsMining {
+	// 					if one.Block == nil {
+	// 						this.chain.witnessBackup.AddBlackList(*one.Addr)
+	// 					} else {
+	// 						this.chain.witnessBackup.SubBlackList(*one.Addr)
+	// 					}
+	// 					one.CheckIsMining = true
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// 	// engine.Log.Info("构建区块组 444 耗时 %s", time.Now().Sub(start))
+
+	// 	this.chain.CountBlock()
+
+	// 	// engine.Log.Info("构建区块组 555 耗时 %s", time.Now().Sub(start))
+
+	// 	if bhvo.BH.GroupHeight != config.Mining_group_start_height+1 {
+	// 		// engine.Log.Info("本次构建的区块组高度   3333333333333333 %d", i)
+	// 		this.witnessGroup = this.witnessGroup.NextGroup
+	// 	}
+	// 	//构建一个新的见证人组
+	// 	// engine.Log.Info("构建区块组 666 耗时 %s", time.Now().Sub(start))
+	// }
+	// this.BuildWitnessGroup(false, isNewGroup)
 
 }
 
 /*
 	则构建这一组见证人的所有出块，保存关系
 */
-func (this *WitnessGroup) BuildGroup() *WitnessGroup {
+func (this *WitnessGroup) BuildGroup(blockhash *[]byte) *WitnessGroup {
 	// fmt.Println("统计并修改组", this.Height)
+	if blockhash == nil || len(*blockhash) <= 0 {
+		engine.Log.Info("count group:%d", this.Height)
+	} else {
+		engine.Log.Info("count group:%d preblockhash:%s", this.Height, hex.EncodeToString(*blockhash))
+	}
 
 	//已经构建了则退出，避免重复构建浪费计算资源
-	if this.BlockGroup != nil {
+	if this.IsBuildGroup {
+		engine.Log.Info("Already built.")
 		return nil
 	}
 
 	//判断这个组是否多人出块
-	ok, group := this.CheckBlockGroup()
+	ok, group := this.CheckBlockGroup(blockhash)
 	if !ok {
-		// fmt.Println("本组出块人数太少，不合格")
+		engine.Log.Info("The number of people in this group is too small and unqualified. group:%d", this.Height)
+		// this.IsBuildGroup = true
 		return nil
 	}
 
 	// engine.Log.Info("本组出块数量 %d", len(group.Blocks))
+	// for _, one := range group.Blocks {
+	// 	engine.Log.Info("出块组信息：组高度 %d 块高度 %d", one.Group.Height, one.Height)
+	// }
 
 	this.BlockGroup = group
+	this.IsBuildGroup = true
+	// for _, one := range group.Blocks {
+	// 	engine.Log.Info("构建成功的块one :%d %s", one.Height, hex.EncodeToString(one.Id))
+	// }
 
 	// fmt.Println("BuildGroup  1111111111111")
 
 	//找到上一组
 	beforeGroup := this.PreGroup
 	for beforeGroup = this.PreGroup; beforeGroup != nil; beforeGroup = beforeGroup.PreGroup {
-		ok, _ = beforeGroup.CheckBlockGroup()
+		ok, _ = beforeGroup.CheckBlockGroup(blockhash)
 		if ok {
 			break
 		}
 	}
 
 	if beforeGroup == nil {
+		engine.Log.Info("The last group found is empty")
 		return nil
 	}
+
+	// engine.Log.Info("确定本组被确认 ======================== %d", this.Height)
 	//修改组引用
 	beforeGroup.BlockGroup.NextGroup = this.BlockGroup
 	this.BlockGroup.PreGroup = beforeGroup.BlockGroup
@@ -181,14 +300,17 @@ func (this *WitnessGroup) BuildGroup() *WitnessGroup {
 	beforeBlock := beforeGroup.BlockGroup.Blocks[len(beforeGroup.BlockGroup.Blocks)-1]
 	//这里决定了保存到数据库中的链是已经确认的链，没有保存分叉
 	beforeBlock.NextBlock = this.BlockGroup.Blocks[0]
+	// engine.Log.Info("222 update block nextblockhash,this height:%d blockid:%s nextid:%s", beforeBlock.Height, hex.EncodeToString(beforeBlock.Id), hex.EncodeToString(this.BlockGroup.Blocks[0].Id))
 	// beforeBlock.FlashNextblockhash()
 	return beforeGroup
 }
 
 /*
 	判断是否多半人出块，只判断，不作修改和保存
+	@return    bool    是否多人出块
+	@return    *Group  评选出来的多人出块组
 */
-func (this *WitnessGroup) CheckBlockGroup() (bool, *Group) {
+func (this *WitnessGroup) CheckBlockGroup(blockhash *[]byte) (bool, *Group) {
 	// fmt.Println("统计本组合法的区块组", this.Height)
 
 	//已经统计过了，就不需要再统计了，直接返回
@@ -197,10 +319,11 @@ func (this *WitnessGroup) CheckBlockGroup() (bool, *Group) {
 		return true, this.BlockGroup
 	}
 
-	group := this.SelectionChain()
+	// engine.Log.Info("CheckBlockGroup SelectionChain")
+	group := this.SelectionChain(blockhash)
 	//出块数量为0
 	if group == nil {
-		// fmt.Println("评选出来的组为空")
+		// engine.Log.Info("评选出来的组为空")
 		return false, nil
 	}
 	totalWitness := len(this.Witness)
@@ -209,62 +332,367 @@ func (this *WitnessGroup) CheckBlockGroup() (bool, *Group) {
 	// if (totalHave * 2) < totalWitness {
 	//包含只有两个见证人的情况，一人出块既是成功
 	if (totalHave * 2) <= totalWitness {
-		// fmt.Println("出块人太少 不合格")
+		// engine.Log.Info("出块人太少 不合格 %d %d", totalHave, totalWitness)
 		return false, group
 	}
 	// fmt.Println("出块人多数 合格")
+	// engine.Log.Info("groupheight:%d 出块人多数 %d 合格", this.Height, totalHave)
 	return true, group
 }
 
 /*
 	选出这个见证人组中出块最多块的链
 */
-func (this *WitnessGroup) SelectionChain() *Group {
-	this.CollationRelationship()
+func (this *WitnessGroup) SelectionChain(blockhash *[]byte) *Group {
+	// engine.Log.Info("整理本组区块前后关系 %d", this.Height)
+	// var blockhash *[]byte
+	// this.CleanRelationship()
+	this.CollationRelationship(blockhash)
 
+	// if this.Height > logblockheight || this.Height < 145137 {
 	// engine.Log.Info("开始评选出块最多的组 group height %d", this.Height)
+	// }
 
 	//开始评选出块最多的组
 	groupMap := make(map[string]*Group) //key:string=每个组的首个快hash;value:*Group=分叉组;
 	for _, one := range this.Witness {
-		// fmt.Println("开始评选出块最多的组 111111111111111")
+		// if this.Height > logblockheight || this.Height < 145137 {
+		// engine.Log.Info("开始评选出块最多的组 111111111111111")
+		// }
 		// totalWitness++
 		if one.Block == nil {
-			// fmt.Println("开始评选出块最多的组 2222222222222222222222")
+			// if this.Height > logblockheight || this.Height < 145137 {
+			// engine.Log.Info("开始评选出块最多的组 2222222222222222222222")
+			// }
 			continue
 		}
 		if one.Block.Group == nil {
+			// engine.Log.Info("开始评选出块最多的组 这里退出了")
+			continue
+		}
+		blocks := one.Block.Group.Blocks
+		// engine.Log.Info("开始评选出块最多的组 3333333333333333333 %v", one.Block.Group)
+		// engine.Log.Info("开始评选出块最多的组 3333333333333333333 group:%d height:%d total:%d", this.Height, one.Block.Height, len(one.Block.Group.Blocks))
+		// engine.Log.Info("开始评选出块最多的组 4444444 %s %s", hex.EncodeToString(blocks[0].Id), hex.EncodeToString(blocks[len(blocks)-1].Id))
+		// groupMap[utils.Bytes2string(one.Block.Group.Blocks[0].Id)] = one.Block.Group
+		groupMap[utils.Bytes2string(blocks[len(blocks)-1].Id)] = one.Block.Group
+		// engine.Log.Info("开始评选出块最多的组 55555 %s %v", hex.EncodeToString(blocks[len(blocks)-1].Id), one.Block.Group)
+	}
+	// engine.Log.Info("开始评选出块最多的组 444444444444444444444")
+	//评选出块多的组
+	// var group *Group
+	var group *Group            //这是无后接区块评选出来的组，两组相同，取前组
+	var groupByBlockhash *Group //这是根据后接区块hash查找到的组，只有一个结果，查找不到则为空。
+	for _, v := range groupMap {
+		if blockhash != nil && groupByBlockhash == nil {
+			for _, blockOne := range v.Blocks {
+				// engine.Log.Info("对比区块id this:%s param:%s", hex.EncodeToString(blockOne.Id), hex.EncodeToString(*blockhash))
+				if bytes.Equal(blockOne.Id, *blockhash) {
+					// engine.Log.Info("找到这个块了")
+					groupByBlockhash = v
+					break
+				}
+			}
+		}
+		// engine.Log.Info("开始评选出块最多的组 555555555555555555")
+		if group == nil {
+			// engine.Log.Info("开始评选出块最多的组 66666666666666666")
+			group = v
+			continue
+		}
+		// engine.Log.Info("开始评选出块最多的组 77777777777777777777")
+		if len(v.Blocks) > len(group.Blocks) {
+			// engine.Log.Info("开始评选出块最多的组 88888888888888888888")
+			group = v
+		}
+		// engine.Log.Info("开始评选出块最多的组 99999999999999999")
+	}
+	// engine.Log.Info("hahahah")
+	if blockhash != nil {
+		group = groupByBlockhash
+	}
+	if group == nil || group.Blocks == nil || len(group.Blocks) <= 0 {
+		// engine.Log.Info("返回空")
+		return group
+	}
+
+	//给组内的区块通过修改NextBlock，从新建立关系
+	for _, lastBlock := range group.Blocks {
+		for _, preBlock := range group.Blocks {
+			if bytes.Equal(lastBlock.PreBlockID, preBlock.Id) {
+				preBlock.NextBlock = lastBlock
+				lastBlock.PreBlock = preBlock
+				// engine.Log.Info("555 update block nextblockhash,this %d blockid:%s nextid:%s", preBlock.Height,
+				// hex.EncodeToString(preBlock.Id), hex.EncodeToString(lastBlock.Id))
+				break
+			}
+		}
+	}
+
+	//找到本大组第一个区块和上一个大组最后一个区块，修改NextBlock，把两个大组连接起来
+	firstBlock := group.Blocks[0]
+	// engine.Log.Info("查找的区块 %s %+v", hex.EncodeToString(firstBlock.PreBlockID), firstBlock)
+	for preWitnessGroup := this.PreGroup; preWitnessGroup != nil; preWitnessGroup = preWitnessGroup.PreGroup {
+		// engine.Log.Info("寻找本组首块之前的区块 goup:%d", preWitnessGroup.Height)
+		have := false
+		for _, witnessOne := range preWitnessGroup.Witness {
+			// engine.Log.Info("寻找本组首块之前的区块2")
+			if witnessOne.Block == nil {
+				// engine.Log.Info("寻找本组首块之前的区块2")
+				continue
+			}
+			// engine.Log.Info("对比区块id %d %s %s", witnessOne.Block.Height, hex.EncodeToString(witnessOne.Block.Id), hex.EncodeToString(firstBlock.PreBlockID))
+			if bytes.Equal(witnessOne.Block.Id, firstBlock.PreBlockID) {
+				// engine.Log.Info("444 update block nextblockhash,this %d blockid:%s nextid:%s", witnessOne.Block.Height, hex.EncodeToString(witnessOne.Block.Id), hex.EncodeToString(firstBlock.Id))
+
+				witnessOne.Block.NextBlock = firstBlock
+				firstBlock.PreBlock = witnessOne.Block
+				have = true
+				break
+			}
+		}
+		if have {
+			break
+		}
+	}
+	// engine.Log.Info("hahahah")
+	// engine.Log.Info("开始评选出块最多的组 99999 %v", group)
+	return group
+}
+
+/*
+	清理删除本组中的组关系
+*/
+func (this *WitnessGroup) CleanRelationship() {
+	for _, one := range this.Witness {
+		if one.Block == nil {
+			continue
+		}
+		one.Block.Group = nil
+	}
+}
+
+/*
+	查找本组中已出区块之间的前后关系，从后往前查找，给他们创建出块组，用于统计出块最多的组
+	分叉处理：当参数为空时，则随意选择一组。用作出块时[选择]前置区块
+	分叉处理：找到参数指定的区块，创建分组。用作导入区块[寻找]前置区块
+	@blockhash    *[]byte    从指定区块hash开始，从后往前建立关系
+*/
+func (this *WitnessGroup) CollationRelationship(blockhash *[]byte) {
+	// engine.Log.Info("整理本组中区块的前后关系 group height %d", this.Height)
+
+	if blockhash == nil {
+		// engine.Log.Info("整理关系 %d", len(this.Witness))
+		for i := len(this.Witness); i > 0; i-- {
+			witness := this.Witness[i-1]
+			// engine.Log.Info("整理关系 111111111111")
+			if witness.Block == nil {
+				// engine.Log.Info("关系   11111111111")
+				continue
+			}
+			newBlock := witness.Block
+
+			//找到连续的下一个块的见证人
+			// var nextWitness *Witness
+			for witnessTemp := witness.NextWitness; witnessTemp != nil; witnessTemp = witnessTemp.NextWitness {
+				// engine.Log.Info("关系   33333333333")
+				if witnessTemp.Group.Height != witness.Group.Height {
+					// engine.Log.Info("创建组   33333333333 %d", newBlock.Height)
+					//未找到同组其他区块，自己创建一个组
+					newGroup := new(Group)
+					newGroup.Height = witness.Group.Height
+					newGroup.Blocks = []*Block{newBlock}
+					newBlock.Group = newGroup
+					break
+				}
+				if witnessTemp.Block == nil {
+					// engine.Log.Info("关系   2222222222")
+					continue
+				}
+				if bytes.Equal(witnessTemp.Block.PreBlockID, newBlock.Id) {
+					// engine.Log.Info("关系   44444444444444")
+					//找到这个见证人了，在组中添加这个区块
+					// nextWitness = witnessTemp
+					//从后往前查找，则把本块放在出块组的前面
+					witnessTemp.Block.Group.Blocks = append([]*Block{newBlock}, witnessTemp.Block.Group.Blocks...)
+					witness.Block.Group = witnessTemp.Block.Group
+					newBlock.NextBlock = witnessTemp.Block
+					// engine.Log.Info("333 update block nextblockhash,this %d blockid:%s nextid:%s", newBlock.Height,
+					// 	hex.EncodeToString(newBlock.Id), hex.EncodeToString(witnessTemp.Block.Id))
+					witnessTemp.Block.PreBlock = newBlock
+					break
+				}
+			}
+			//创始区块
+			if witness.Block.Height == config.Mining_block_start_height {
+				// engine.Log.Info("关系   888888888888888")
+				newGroup := new(Group)
+				newGroup.Height = witness.Group.Height // bhvo.BH.GroupHeight
+				newGroup.Blocks = []*Block{newBlock}
+				// newGroup.NextGroup = make([]*Group, 0)
+				newBlock.Group = newGroup
+				continue
+			}
+		}
+	} else {
+		//先找到前置区块
+		// var findBlock *Block
+		// newGroup := new(Group)
+		// for _, _ = range this.Witness {
+		// 	for _, witness := range this.Witness {
+		// 		if witness.Block == nil {
+		// 			// engine.Log.Info("关系   2222222222")
+		// 			continue
+		// 		}
+		// 		newBlock := witness.Block
+		// 		//先找到前置区块
+		// 		if findBlock == nil && bytes.Equal(newBlock.Id, *blockhash) {
+		// 			// engine.Log.Info("-------- xxxxx 创建一个区块组 %d pre:%s %s", newBlock.Height, witness.PreWitness.Addr.B58String(), witness.Addr.B58String())
+		// 			// newGroup := new(Group)
+		// 			newGroup.Height = witness.Group.Height
+		// 			newGroup.Blocks = []*Block{newBlock}
+		// 			newBlock.Group = newGroup
+		// 			findBlock = newBlock
+		// 			break
+		// 		}
+
+		// 		if findBlock != nil && bytes.Equal(witness.Block.Id, findBlock.PreBlockID) {
+		// 			// engine.Log.Info("-------- 找到区块组，添加一个区块 %d pre:%s %s", newBlock.Height, witness.PreWitness.Addr.B58String(), witness.Addr.B58String())
+		// 			// findBlock.Group.Blocks = append([]*Block{newBlock}, findBlock.Group.Blocks...)
+		// 			// witness.Block.Group = findBlock.Group
+		// 			newGroup.Blocks = append([]*Block{newBlock}, newGroup.Blocks...)
+		// 			witness.Block.Group = newGroup
+		// 			findBlock = witness.Block
+		// 			break
+		// 		}
+		// 		//创始区块
+		// 		if witness.Block.Height == config.Mining_block_start_height {
+		// 			// engine.Log.Info("关系   888888888888888")
+		// 			newGroup := new(Group)
+		// 			newGroup.Height = witness.Group.Height // bhvo.BH.GroupHeight
+		// 			newGroup.Blocks = []*Block{newBlock}
+		// 			// newGroup.NextGroup = make([]*Group, 0)
+		// 			newBlock.Group = newGroup
+		// 			continue
+		// 		}
+		// 	}
+		// }
+		// engine.Log.Info("-------- 看看新版寻找组 %v", newGroup)
+
+		// engine.Log.Info("整理关系")
+		var findBlock *Block
+		for i := len(this.Witness); i > 0; i-- {
+			witness := this.Witness[i-1]
+			if witness.Block == nil {
+				// engine.Log.Info("关系   2222222222")
+				continue
+			}
+			// engine.Log.Info("关系区块 %d %s", witness.Block.Height, witness.Addr.B58String())
+			newBlock := witness.Block
+			if findBlock == nil {
+				//当指定的区块未寻找到，则继续寻找
+				if bytes.Equal(newBlock.Id, *blockhash) {
+					// engine.Log.Info("-------- 创建一个区块组 %d", newBlock.Height)
+					newGroup := new(Group)
+					newGroup.Height = witness.Group.Height
+					newGroup.Blocks = []*Block{newBlock}
+					newBlock.Group = newGroup
+					findBlock = newBlock
+				}
+				continue
+			}
+			//继续寻找同组的其他区块
+			if bytes.Equal(witness.Block.Id, findBlock.PreBlockID) {
+				//找到这个见证人了，在组中添加这个区块
+				// nextWitness = witnessTemp
+				//从后往前查找，则把本块放在出块组的前面
+				// engine.Log.Info("-------- 找到区块组，添加一个区块 %d", newBlock.Height)
+				findBlock.Group.Blocks = append([]*Block{newBlock}, findBlock.Group.Blocks...)
+				witness.Block.Group = findBlock.Group
+				findBlock = witness.Block
+				// break
+				continue
+			}
+
+			//创始区块
+			if witness.Block.Height == config.Mining_block_start_height {
+				// engine.Log.Info("关系   888888888888888")
+				newGroup := new(Group)
+				newGroup.Height = witness.Group.Height // bhvo.BH.GroupHeight
+				newGroup.Blocks = []*Block{newBlock}
+				// newGroup.NextGroup = make([]*Group, 0)
+				newBlock.Group = newGroup
+				continue
+			}
+		}
+	}
+
+	// for _, witnessOne := range this.Witness {
+	// 	if witnessOne.Block == nil {
+	// 		continue
+	// 	}
+	// 	for _, blockOne := range witnessOne.Block.Group.Blocks {
+	// 		engine.Log.Info("witness one:%+v", blockOne)
+	// 	}
+	// }
+}
+
+/*
+	选出这个见证人组中出块最多块的链
+*/
+func (this *WitnessGroup) SelectionChainOld() *Group {
+	this.CollationRelationshipOld()
+
+	// if this.Height > logblockheight || this.Height < 145137 {
+	// engine.Log.Info("开始评选出块最多的组 group height %d", this.Height)
+	// }
+
+	//开始评选出块最多的组
+	groupMap := make(map[string]*Group) //key:string=每个组的首个快hash;value:*Group=分叉组;
+	for _, one := range this.Witness {
+		// if this.Height > logblockheight || this.Height < 145137 {
+		// engine.Log.Info("开始评选出块最多的组 111111111111111")
+		// }
+		// totalWitness++
+		if one.Block == nil {
+			// if this.Height > logblockheight || this.Height < 145137 {
+			// engine.Log.Info("开始评选出块最多的组 2222222222222222222222")
+			// }
+			continue
+		}
+		if one.Block.Group == nil {
+			// engine.Log.Info("开始评选出块最多的组 这里退出了")
 			continue
 		}
 		// engine.Log.Info("开始评选出块最多的组 3333333333333333333 %v", one.Block.Group)
 		// engine.Log.Info("开始评选出块最多的组 3333333333333333333 group:%d total:%d", this.Height, len(one.Block.Group.Blocks))
-		groupMap[hex.EncodeToString(one.Block.Group.Blocks[0].Id)] = one.Block.Group
+		groupMap[utils.Bytes2string(one.Block.Group.Blocks[0].Id)] = one.Block.Group
 	}
-	// fmt.Println("开始评选出块最多的组 444444444444444444444")
+	// engine.Log.Info("开始评选出块最多的组 444444444444444444444")
 	//评选出块多的组
 	var group *Group
 	for _, v := range groupMap {
-		// fmt.Println("开始评选出块最多的组 555555555555555555")
+		// engine.Log.Info("开始评选出块最多的组 555555555555555555")
 		if group == nil {
-			// fmt.Println("开始评选出块最多的组 66666666666666666")
+			// engine.Log.Info("开始评选出块最多的组 66666666666666666")
 			group = v
 			continue
 		}
-		// fmt.Println("开始评选出块最多的组 77777777777777777777")
+		// engine.Log.Info("开始评选出块最多的组 77777777777777777777")
 		if len(v.Blocks) > len(group.Blocks) {
-			// fmt.Println("开始评选出块最多的组 88888888888888888888")
+			// engine.Log.Info("开始评选出块最多的组 88888888888888888888")
 			group = v
 		}
-		// fmt.Println("开始评选出块最多的组 99999999999999999")
+		// engine.Log.Info("开始评选出块最多的组 99999999999999999")
 	}
-	// fmt.Println("开始评选出块最多的组 99999", group)
+	// engine.Log.Info("开始评选出块最多的组 99999 %v", group)
 	return group
 }
 
 /*
 	整理本组中已出区块之间的前后关系
 */
-func (this *WitnessGroup) CollationRelationship() {
+func (this *WitnessGroup) CollationRelationshipOld() {
 	// engine.Log.Info("整理本组中区块的前后关系 group height %d", this.Height)
 	//先将这个组的块分成组
 	for _, witness := range this.Witness {
@@ -285,29 +713,27 @@ func (this *WitnessGroup) CollationRelationship() {
 				continue
 			}
 			//往前查找n个组，查不到跳出循环
-			if witnessTemp.Group.Height+config.Witness_backup_group <= witness.Group.Height {
+			// if witnessTemp.Group.Height+config.Witness_backup_group <= witness.Group.Height {
+			if witnessTemp.Group.Height+uint64(config.Witness_backup_group) <= witness.Group.Height {
 				//刚好本见证人的前面的一个见证人没有出块，则同步这个块
 				for syncWitness := witness.PreWitness; syncWitness != nil &&
-					witness.Group.Height == syncWitness.Group.Height+1; syncWitness =
-					syncWitness.PreWitness {
+					witness.Group.Height == syncWitness.Group.Height+1; syncWitness = syncWitness.PreWitness {
 					if syncWitness.Block != nil {
 						continue
 					}
-
 					//					bfw := BlockForWitness{
 					//						GroupHeight: syncWitness.Group.Height, //见证人组高度
 					//						Addr:        *syncWitness.Addr,        //见证人地址
 					//					}
 					//					//开始同步
 					//					go syncWitness.syncBlock(5, time.Second/5, &bfw)
-
 				}
-				break
+				// break
 			}
 
 			// fmt.Println("--", newBlock)
-			// engine.Log.Info("查看上一个区块 %d hash %s %s ", witnessTemp.Block.Height,
-			// hex.EncodeToString(witnessTemp.Block.Id), hex.EncodeToString(newBlock.PreBlockID))
+			// engine.Log.Info("查看上一个区块 %d hash %s %s %v", witnessTemp.Block.Height,
+			// hex.EncodeToString(witnessTemp.Block.Id), hex.EncodeToString(newBlock.PreBlockID), newBlock)
 			if bytes.Equal(witnessTemp.Block.Id, newBlock.PreBlockID) {
 				// engine.Log.Info("关系   66666666666666")
 				// newBlock.PreBlock = witnessTemp.Block
@@ -349,6 +775,7 @@ func (this *WitnessGroup) CollationRelationship() {
 				}
 			}
 			if !have {
+				// engine.Log.Info("update block nextblockhash,this blockid:%s nextid:%s", hex.EncodeToString(beforeWitness.Block.Id), hex.EncodeToString(newBlock.Id))
 				//组高度相同
 				beforeWitness.Block.Group.Blocks = append(beforeWitness.Block.Group.Blocks, newBlock)
 				newBlock.Group = beforeWitness.Block.Group
@@ -392,18 +819,10 @@ func (this *WitnessGroup) CollationRelationship() {
 
 /*
 	依次获取n个未分配组的见证人，构建一个新的见证人组
+	@isPrint    bool    是否打印日志
 */
-func (this *WitnessChain) BuildWitnessGroup(first bool) {
+func (this *WitnessChain) BuildWitnessGroup(first, isPrint bool) {
 	backupGroup := uint64(config.Witness_backup_group)
-
-	// //判断是否有多半人出块
-	// if !this.witnessChain.witnessGroup.BuildWitnessGroup() {
-	// 	//没有多半人出块
-	// 	return
-	// }
-
-	//
-	// fmt.Println("-------构建见证人组")
 
 	//判断备用见证人组数量是否足够，不够则创建
 	totalBackupGroup := 0
@@ -411,7 +830,6 @@ func (this *WitnessChain) BuildWitnessGroup(first bool) {
 	lastGroupHeight := uint64(config.Mining_group_start_height)
 	var lastGroup *WitnessGroup
 	for lastGroup = this.witnessGroup; lastGroup != nil; lastGroup = lastGroup.NextGroup {
-		// fmt.Println("-------构建见证人组  222222222222222222222")
 		// engine.Log.Info("-------构建见证人组  222222222222222222222")
 		totalBackupGroup++
 		tag = lastGroup.tag
@@ -419,7 +837,6 @@ func (this *WitnessChain) BuildWitnessGroup(first bool) {
 		if lastGroup.NextGroup == nil {
 			break
 		}
-
 	}
 
 	// engine.Log.Info("-------构建见证人组  3333333333333333333 %d %d", totalBackupGroup, backupGroup)
@@ -427,7 +844,6 @@ func (this *WitnessChain) BuildWitnessGroup(first bool) {
 	if first {
 		backupGroup = 0
 	} else {
-
 		total := this.witnessBackup.GetBackupWitnessTotal()
 		groupNum := total / config.Mining_group_max
 		if groupNum > backupGroup {
@@ -437,88 +853,210 @@ func (this *WitnessChain) BuildWitnessGroup(first bool) {
 
 	// engine.Log.Info("-------构建见证人组  444444444444444 %d %d", totalBackupGroup, backupGroup)
 	for i := uint64(totalBackupGroup); i <= backupGroup; i++ {
-		//从候选见证人中评选出备用见证人来
-		// witness := this.witnessBackup.CreateWitnessGroup(block)
-		// if witness == nil {
-		// 	return
-		// }
-		// this.AddWitness(witness, block)
-		//把评选出来的所有备用见证人分组成为见证人组。
-		// for {
-		witnessGroup := this.GetOneGroupWitness()
-		// engine.Log.Info("获取的见证人组中，见证人数量 %d", len(witnessGroup))
-		if witnessGroup == nil || len(witnessGroup) < config.Mining_group_min {
-			// fmt.Println("见证人数量不够 11111")
-			// engine.Log.Info("见证人数量不够 %d %d", len(witnessGroup), config.Mining_group_min)
+		newGroup := this.AdditionalWitnessBackup(lastGroup, lastGroupHeight, tag)
+		if newGroup == nil {
 			break
 		}
-		// fmt.Println("111111111111")
-		//找到上一个见证人的出块时间
-		startTime := int64(0)
-		if lastGroup != nil {
-			w := lastGroup.Witness[len(lastGroup.Witness)-1]
-			startTime = w.CreateBlockTime
-		}
-		//给见证人计算出块时间
-		for _, one := range witnessGroup {
-			startTime = startTime + config.Mining_block_time
-			one.CreateBlockTime = startTime
-		}
-
-		// groupHeight := uint64(0)
-		// if this.backupGroupLast != nil {
-		// 	groupHeight = this.backupGroupLast.Height + 1
-		// }
-		if lastGroup != nil {
-			lastGroupHeight++
-		}
-		newGroup := &WitnessGroup{
-			PreGroup: lastGroup,       //备用见证人最后一个组
-			Height:   lastGroupHeight, //
-			Witness:  witnessGroup,    //本组见证人列表
-			tag:      !tag,            //
-			// check:    false,                //这个见证人组是否多半人出块，多半人出块则合法有效
-		}
-
+		lastGroupHeight++
 		tag = !tag
-		for i, _ := range newGroup.Witness {
-			newGroup.Witness[i].Group = newGroup
-		}
-
-		if lastGroup != nil {
-			// fmt.Println("设置next为什么不生效", newGroup.Witness[0])
-			lastGroup.Witness[len(lastGroup.Witness)-1].NextWitness = newGroup.Witness[0]
-			newGroup.Witness[0].PreWitness = lastGroup.Witness[len(lastGroup.Witness)-1]
-			lastGroup.NextGroup = newGroup
-			newGroup.PreGroup = lastGroup
-		}
-
-		// fmt.Println("本次创建见证人组1", &newGroup, newGroup)
-
-		// if this.backupGroupLast != nil {
-
-		// 	this.backupGroupLast.NextGroup = newGroup
-		// 	this.backupGroupLast.Witness[len(this.backupGroupLast.Witness)-1].NextWitness = newGroup.Witness[0]
-		// 	newGroup.Witness[0].PreWitness = this.backupGroupLast.Witness[len(this.backupGroupLast.Witness)-1]
-		// }
-		// this.backupGroupLast = newGroup
 		lastGroup = newGroup
 
-		// fmt.Println("本次创建见证人组2", &lastGroup, lastGroup)
-		// for i, one := range newGroup.Witness {
-		// 	fmt.Println("跟踪见证人---", i, *one)
-		// }
-		// fmt.Println("555555555555")
 		if this.witnessGroup == nil {
-			// fmt.Println("666666666666666")
 			this.witnessGroup = newGroup
 		}
-		// fmt.Println("本次创建见证人组3", this.witnessGroup)
-		// }
-
 	}
-	this.PrintWitnessList()
+	if isPrint {
+		this.PrintWitnessList()
+	}
+}
 
+/*
+	从最后一组备用见证人组追加备用见证人组
+*/
+func (this *WitnessChain) AdditionalWitnessBackup(lastGroup *WitnessGroup, lastGroupHeight uint64, tag bool) *WitnessGroup {
+	// engine.Log.Info("开始构建组高度AdditionalWitnessBackup %d", lastGroupHeight)
+	//从候选见证人中评选出备用见证人来
+	//把评选出来的所有备用见证人分组成为见证人组。
+	witnessGroup := this.GetOneGroupWitness()
+	// engine.Log.Info("获取的见证人组中，见证人数量 %d", len(witnessGroup))
+	if witnessGroup == nil || len(witnessGroup) < config.Mining_group_min {
+		engine.Log.Info("Too few witnesses current:%d min:%d", len(witnessGroup), config.Mining_group_min)
+		return nil
+	}
+	//找到上一个见证人的出块时间
+	startTime := int64(0)
+	if lastGroup != nil {
+		w := lastGroup.Witness[len(lastGroup.Witness)-1]
+		startTime = w.CreateBlockTime
+	}
+	//给见证人计算出块时间
+	for _, one := range witnessGroup {
+		startTime = startTime + config.Mining_block_time
+		one.CreateBlockTime = startTime
+	}
+	if lastGroup != nil {
+		lastGroupHeight++
+	}
+	newGroup := &WitnessGroup{
+		PreGroup: lastGroup,       //备用见证人最后一个组
+		Height:   lastGroupHeight, //
+		Witness:  witnessGroup,    //本组见证人列表
+		tag:      !tag,            //
+		// check:    false,                //这个见证人组是否多半人出块，多半人出块则合法有效
+	}
+
+	for i, _ := range newGroup.Witness {
+		newGroup.Witness[i].Group = newGroup
+	}
+
+	if lastGroup != nil {
+		lastGroup.Witness[len(lastGroup.Witness)-1].NextWitness = newGroup.Witness[0]
+		newGroup.Witness[0].PreWitness = lastGroup.Witness[len(lastGroup.Witness)-1]
+		lastGroup.NextGroup = newGroup
+		newGroup.PreGroup = lastGroup
+	}
+	return newGroup
+}
+
+/*
+	拉起链端后，根据当前时间补偿备用见证人组
+*/
+func (this *WitnessChain) CompensateWitnessGroup() {
+	backupGroup := uint64(config.Witness_backup_group)
+
+	//判断备用见证人组数量是否足够，不够则创建
+	// hasWitnessSelf := false
+	totalBackupGroup := 0
+	tag := false
+	lastGroupHeight := uint64(config.Mining_group_start_height)
+	var lastGroup *WitnessGroup
+	for lastGroup = this.witnessGroup; lastGroup != nil; lastGroup = lastGroup.NextGroup {
+
+		// engine.Log.Info("-------构建见证人组  222222222222222222222")
+		totalBackupGroup++
+		tag = lastGroup.tag
+		lastGroupHeight = lastGroup.Height
+		if lastGroup.NextGroup == nil {
+			break
+		}
+	}
+
+	//判断当前见证人组出块时间是否超时
+	witness := lastGroup.Witness[len(lastGroup.Witness)-1]
+	for {
+		witness = lastGroup.Witness[len(lastGroup.Witness)-1]
+		if witness.CreateBlockTime > utils.GetNow() {
+			break
+		}
+
+		//
+		this.BuildBlockGroupForGroupHeight(lastGroup.Height-1, nil)
+
+		totalBackupGroup = 0
+		newGroup := this.AdditionalWitnessBackup(lastGroup, lastGroupHeight, tag)
+		if newGroup == nil {
+			break
+		}
+		lastGroupHeight++
+		tag = !tag
+		lastGroup = newGroup
+
+		// engine.Log.Info("新组高度 %d %d", lastGroupHeight, lastGroup.Height)
+		engine.Log.Info("New group height %d %d", lastGroupHeight, lastGroup.Height)
+
+		// engine.Log.Info("预计出块时间 %d %s", witness.Group.Height, time.Unix(witness.CreateBlockTime, 0).Format("2006-01-02 15:04:05"))
+		engine.Log.Info("Estimated block out time %d %s", witness.Group.Height, time.Unix(witness.CreateBlockTime, 0).Format("2006-01-02 15:04:05"))
+		continue
+	}
+
+	// engine.Log.Info("-------构建见证人组  3333333333333333333 %d %d", totalBackupGroup, backupGroup)
+
+	// if first {
+	// 	backupGroup = 0
+	// } else {
+
+	total := this.witnessBackup.GetBackupWitnessTotal()
+	groupNum := total / config.Mining_group_max
+	if groupNum > backupGroup {
+		backupGroup = groupNum
+	}
+	// }
+
+	// engine.Log.Info("-------构建见证人组  444444444444444 %d %d", totalBackupGroup, backupGroup)
+	for i := uint64(totalBackupGroup); i <= backupGroup; i++ {
+
+		newGroup := this.AdditionalWitnessBackup(lastGroup, lastGroupHeight, tag)
+		if newGroup == nil {
+			break
+		}
+		lastGroupHeight++
+		tag = !tag
+		lastGroup = newGroup
+
+		if this.witnessGroup == nil {
+			this.witnessGroup = newGroup
+		}
+	}
+	// engine.Log.Info("开始打印备用见证人组信息")
+	this.PrintWitnessList()
+	// engine.Log.Info("开始查询是否是备用见证人")
+	//查询是否是备用见证人
+	_, isBackup, _, _, _ := GetWitnessStatus()
+	if isBackup {
+		config.AlreadyMining = true
+	}
+	// engine.Log.Info("开始暂停所有出块")
+	this.StopAllMining()
+	// engine.Log.Info("开始构建出块时间")
+	this.BuildMiningTime()
+	// engine.Log.Info("构建出块时间完成")
+	this.chain.SyncBlockFinish = true
+}
+
+/*
+	根据导入区块高度补偿备用见证人组
+*/
+func (this *WitnessChain) CompensateWitnessGroupByGroupHeight(groupHeight uint64) {
+	// engine.Log.Info("构建到组高度 %d", groupHeight)
+
+	//判断备用见证人组数量是否足够，不够则创建
+	totalBackupGroup := 0
+	tag := false
+	lastGroupHeight := uint64(config.Mining_group_start_height)
+	var lastGroup *WitnessGroup
+	for lastGroup = this.witnessGroup; lastGroup != nil; lastGroup = lastGroup.NextGroup {
+
+		// engine.Log.Info("-------构建见证人组  222222222222222222222")
+		totalBackupGroup++
+		tag = lastGroup.tag
+		lastGroupHeight = lastGroup.Height
+		if lastGroup.NextGroup == nil {
+			break
+		}
+	}
+
+	// engine.Log.Info("已有组高度 %d", lastGroupHeight)
+
+	//判断当前见证人组出块时间是否超时
+	for i := lastGroupHeight; i <= groupHeight; i++ {
+		// engine.Log.Info("开始构建组 %d", lastGroupHeight)
+
+		totalBackupGroup = 0
+		newGroup := this.AdditionalWitnessBackup(lastGroup, lastGroupHeight, tag)
+		if newGroup == nil {
+			break
+		}
+		lastGroupHeight++
+		tag = !tag
+		lastGroup = newGroup
+
+		// engine.Log.Info("新组高度 %d %d", lastGroupHeight, lastGroup.Height)
+
+		// engine.Log.Info("预计出块时间 %d %s", witness.Group.Height, time.Unix(witness.CreateBlockTime, 0).Format("2006-01-02 15:04:05"))
+		continue
+	}
+
+	this.PrintWitnessList()
 }
 
 /*
@@ -533,19 +1071,24 @@ func (this *WitnessChain) StopAllMining() {
 	for {
 		witnessTemp = witnessTemp.NextWitness
 		if witnessTemp == nil || witnessTemp.Group == nil {
+			// engine.Log.Info("11111111111111")
 			break
 		}
 		if !witnessTemp.Group.Task {
+			// engine.Log.Info("222222222222222")
 			continue
 		}
 
-		if !bytes.Equal(*witnessTemp.Addr, addr) {
+		if !bytes.Equal(*witnessTemp.Addr, addr.Addr) {
+			// engine.Log.Info("33333333333333333")
 			continue
 		}
 
 		select {
 		case witnessTemp.StopMining <- false:
+			// engine.Log.Info("444444444444444444")
 		default:
+			// engine.Log.Info("5555555555555555555")
 		}
 		witnessTemp.Group.Task = false
 	}
@@ -554,7 +1097,7 @@ func (this *WitnessChain) StopAllMining() {
 /*
 	给备用见证人添加定时任务，定时出块
 */
-func (this *WitnessChain) BuildMiningTime(force bool) error {
+func (this *WitnessChain) BuildMiningTime() error {
 
 	// engine.Log.Info("=========开始构建所有出块=======")
 
@@ -562,24 +1105,20 @@ func (this *WitnessChain) BuildMiningTime(force bool) error {
 	addr := keystore.GetCoinbase()
 
 	for witnessGroup := this.witnessGroup; witnessGroup != nil; witnessGroup = witnessGroup.NextGroup {
-		// fmt.Println("构建出块 11111111111")
+
 		if witnessGroup.Task {
-			// fmt.Println("构建出块 2222222222222")
 			continue
 		}
 		for _, witnessTemp := range witnessGroup.Witness {
-			// fmt.Println("构建出块 3333333333333333333")
 			if witnessTemp.Block != nil {
 				continue
 			}
-			// fmt.Println("构建出块 555555555555555")
-
-			// fmt.Println("这个见证人是否是自己")
-			if bytes.Equal(*witnessTemp.Addr, addr) {
-				// fmt.Println("构建出块 66666666666666666")
+			if bytes.Equal(*witnessTemp.Addr, addr.Addr) {
+				//自己是见证人的话，永远不停止导入
+				atomic.StoreUint32(&this.chain.StopSyncBlock, 0)
 				future := int64(0) //出块时间，也可以记录上一个块的出块时间
-				// fmt.Println("5555555555555")
-				now := utils.GetNow() //time.Now().Unix()
+				now := utils.GetNow()
+				// engine.Log.Debug("构建出块时间 预约时间 %s 现在时间 %s", time.Unix(witnessTemp.CreateBlockTime, 0), time.Unix(now, 0))
 
 				if witnessTemp.CreateBlockTime > now {
 					future = witnessTemp.CreateBlockTime - now
@@ -599,7 +1138,7 @@ func (this *WitnessChain) BuildMiningTime(force bool) error {
 						// 	//来不及出块了，算了
 						// 	continue
 						// }
-						engine.Log.Warn("It's too late for a block. Forget it %s %s", time.Unix(witnessTemp.CreateBlockTime, 0), time.Unix(now, 0))
+						// engine.Log.Warn("It's too late for a block. Forget it %s %s", time.Unix(witnessTemp.CreateBlockTime, 0), time.Unix(now, 0))
 
 						//来不及出块了，算了
 						continue
@@ -608,15 +1147,15 @@ func (this *WitnessChain) BuildMiningTime(force bool) error {
 				}
 
 				//时间太少，来不及出块
-				if future <= 0 {
-					engine.Log.Info("There's too little time for a block %s %s", time.Unix(witnessTemp.CreateBlockTime, 0), time.Unix(now, 0))
+				if !config.InitNode && future <= 20 {
+					// engine.Log.Info("There's too little time for a block %s %s", time.Unix(witnessTemp.CreateBlockTime, 0), time.Unix(now, 0))
 					continue
 				}
 
 				//开关打开才能出块
-				if !config.AlreadyMining {
-					continue
-				}
+				// if !config.AlreadyMining {
+				// 	continue
+				// }
 
 				// //NOTE 测试某个节点提前出块
 				// engine.Log.Info("当前区块高度 %d", GetHighestBlock())
@@ -632,9 +1171,10 @@ func (this *WitnessChain) BuildMiningTime(force bool) error {
 				// 	witnessTemp.TaskBuildBlock, Task_class_buildBlock, "")
 				witnessTemp.Group.Task = true
 				go witnessTemp.SyncBuildBlock(int64(future))
+				// utils.Go(witnessTemp.SyncBuildBlock(int64(future)))
 			} else {
 				//给不是自己的见证人设置一个定时同步区块的方法
-				witnessTemp.syncBlockTiming()
+				// witnessTemp.syncBlockTiming()
 			}
 			// witnessTemp = witnessTemp.NextWitness
 		}
@@ -659,9 +1199,7 @@ func (this *WitnessChain) GetOneGroupWitness() []*Witness {
 	} else {
 		groupNum = int(total)
 	}
-
 	// engine.Log.Info("本次计算出见证人数量 %d %d", groupNum, total)
-
 	//备用见证人数量太少，则从候选见证人中选一批新的备用见证人
 	if len(this.witnessNotGroup) < groupNum {
 		// engine.Log.Info("数量太少，则评选出新的备用见证人 %d", len(this.witnessNotGroup))
@@ -670,13 +1208,12 @@ func (this *WitnessChain) GetOneGroupWitness() []*Witness {
 			return nil
 		}
 		this.witnessNotGroup = append(this.witnessNotGroup, witness...)
-		for _, temp := range this.witnessNotGroup {
-			engine.Log.Info("print backup witness list %s", temp.Addr.B58String())
-		}
-		engine.Log.Info("print end")
+		// for _, temp := range this.witnessNotGroup {
+		// 	engine.Log.Info("print backup witness list %s", temp.Addr.B58String())
+		// }
+		// engine.Log.Info("print end")
 
 	}
-
 	//保存重复的见证人，需要向后面移动
 	index := 0
 	moveWitness := make([]*Witness, 0)
@@ -707,7 +1244,6 @@ func (this *WitnessChain) GetOneGroupWitness() []*Witness {
 			break
 		}
 	}
-
 	newWitnessNotGroup := this.witnessNotGroup[index+1:]
 	this.witnessNotGroup = make([]*Witness, 0)
 	//有重复的向后移动，从新排序
@@ -717,7 +1253,6 @@ func (this *WitnessChain) GetOneGroupWitness() []*Witness {
 	for _, one := range newWitnessNotGroup {
 		this.witnessNotGroup = append(this.witnessNotGroup, one)
 	}
-
 	//从新建立引用关系
 	tempWitness := witnessGroup[0]
 	for i, _ := range witnessGroup {
@@ -728,114 +1263,8 @@ func (this *WitnessChain) GetOneGroupWitness() []*Witness {
 		witnessGroup[i].PreWitness = tempWitness
 		tempWitness = witnessGroup[i]
 	}
-
 	// engine.Log.Info("最后的见证人数量 %d", len(witnessGroup))
-
 	return witnessGroup
-
-	// //----------------------------------------
-
-	// witnessGroup := make([]*Witness, 0)
-	// tempWitness := this.firstWitnessNotGroup
-	// if tempWitness != nil {
-	// 	for i := 0; i < config.Mining_group_max; i++ {
-	// 		witnessGroup = append(witnessGroup, tempWitness)
-	// 		tempWitness = tempWitness.NextWitness
-	// 		if tempWitness == nil {
-	// 			break
-	// 		}
-	// 	}
-	// }
-
-	// if len(witnessGroup) == groupNum {
-	// 	this.firstWitnessNotGroup = tempWitness
-	// 	return witnessGroup
-	// }
-	// //数量太少，则评选出新的备用见证人
-	// engine.Log.Info("数量太少，则评选出新的备用见证人 %d", groupNum)
-	// witness := this.witnessBackup.CreateWitnessGroup()
-	// if witness == nil {
-	// 	return witnessGroup
-	// }
-	// // this.AddWitness(witness)
-	// this.witnessNotGroup = append(this.witnessNotGroup, witness...)
-
-	// //
-	// // for temp := this.firstWitnessNotGroup; temp != nil; temp = temp.NextWitness {
-	// for _, temp := range this.witnessNotGroup {
-	// 	engine.Log.Info("打印新的备用见证人列表 %s", temp.Addr.B58String())
-	// }
-	// engine.Log.Info("打印完毕")
-
-	// //保存重复的见证人，需要向后面移动
-	// moveWitness := make([]*Witness, 0)
-	// witnessGroup = make([]*Witness, 0)
-	// for tempWitness = this.firstWitnessNotGroup; tempWitness != nil &&
-	// 	len(witnessGroup) < groupNum; tempWitness = tempWitness.NextWitness {
-	// 	//判断组中是否有重复的见证人
-	// 	isHave := false
-	// 	for _, one := range witnessGroup {
-	// 		if bytes.Equal(*tempWitness.Addr, *one.Addr) {
-	// 			engine.Log.Info("有重复 %s", one.Addr.B58String())
-	// 			//把重复的见证人保存下来
-	// 			moveOne := tempWitness
-	// 			moveWitness = append(moveWitness, tempWitness)
-	// 			tempWitness = tempWitness.NextWitness
-	// 			moveOne.NextWitness = nil
-	// 			moveOne.PreWitness = nil
-	// 			isHave = true
-	// 			break
-	// 		}
-	// 	}
-	// 	//有重复的，跳出循环
-	// 	if isHave {
-	// 		continue
-	// 	}
-	// 	witnessGroup = append(witnessGroup, tempWitness)
-
-	// 	// tempWitness = tempWitness.NextWitness
-	// 	// if tempWitness == nil {
-	// 	// 	break
-	// 	// }
-	// }
-	// if len(witnessGroup) != groupNum {
-	// 	return nil
-	// }
-
-	// //有向后移动的，从新排序
-	// if len(moveWitness) > 0 {
-	// 	this.firstWitnessNotGroup = moveWitness[0]
-	// 	newWitnessChainLast := this.firstWitnessNotGroup
-	// 	for i, _ := range moveWitness {
-	// 		if i == 0 {
-	// 			continue
-	// 		}
-	// 		newWitnessChainLast.NextWitness = moveWitness[i]
-	// 		moveWitness[i].PreWitness = newWitnessChainLast
-	// 		newWitnessChainLast = moveWitness[i]
-	// 	}
-	// 	if tempWitness != nil {
-	// 		newWitnessChainLast.NextWitness = tempWitness
-	// 		tempWitness.PreWitness = newWitnessChainLast
-	// 	}
-
-	// } else {
-	// 	this.firstWitnessNotGroup = tempWitness
-	// }
-	// //从新建立引用关系
-	// tempWitness = witnessGroup[0]
-	// for i, _ := range witnessGroup {
-	// 	if i == 0 {
-	// 		continue
-	// 	}
-	// 	tempWitness.NextWitness = witnessGroup[i]
-	// 	witnessGroup[i].PreWitness = tempWitness
-	// 	tempWitness = witnessGroup[i]
-	// }
-
-	// engine.Log.Info("最后的见证人数量 %d", len(witnessGroup))
-
-	// return witnessGroup
 
 }
 
@@ -862,19 +1291,232 @@ func (this *WitnessChain) GetOneGroupWitness() []*Witness {
 func (this *WitnessChain) PrintWitnessList() {
 	//打印未分组的见证人列表
 	// this.witnessBackup.PrintWitnessBackup()
+	// return
 
+	count := 0
 	group := this.witnessGroup
 	for group != nil {
 		engine.Log.Info("--------------")
 		for _, one := range group.Witness {
-
 			// gp, _ := fmt.Printf("%p", group)
 			engine.Log.Info("witness tag %s %t %d %s %s %d", fmt.Sprintf("%p", one.WitnessBackupGroup), group.tag, group.Height, one.Addr.B58String(),
 				time.Unix(one.CreateBlockTime, 0).Format("2006-01-02 15:04:05"), one.VoteNum)
 		}
+		//这里返回，只打印一组见证人
+		count++
+		if count >= 2 {
+			return
+		}
+
 		group = group.NextGroup
 	}
+}
 
+/*
+	在已经确认的区块中查找到对应的区块
+	@return    bool    是否找到
+*/
+func (this *WitnessChain) FindBlockInCurrent(bh *BlockHead) bool {
+	//新的区块只能从未确认的区块和之前的一个已经确认的组开始往后链接区块
+	//第一步：找到组高度对应的组
+	currentGroup := this.witnessGroup
+	for currentGroup != nil {
+		if currentGroup.Height < bh.GroupHeight {
+			currentGroup = currentGroup.NextGroup
+			continue
+		}
+		if currentGroup.Height > bh.GroupHeight {
+			currentGroup = currentGroup.PreGroup
+			continue
+		}
+		break
+	}
+	if currentGroup == nil {
+		return false
+	}
+	//
+	if currentGroup.BlockGroup == nil {
+		return false
+	}
+	// engine.Log.Info("找到的组 %+v", currentGroup)
+
+	//第二步：找出区块
+	for _, one := range currentGroup.Witness {
+		if one.Block == nil {
+			continue
+		}
+		if bytes.Equal(one.Block.Id, bh.Hash) {
+			return true
+		}
+	}
+
+	engine.Log.Info("find the group %+v", currentGroup)
+	return false
+}
+
+/*
+	查找新区块的前置区块是否存在，并且合法
+	合法就是：前置区块必须是已确认的组最后一个区块，不能是已确认的组之前的区块
+	@return    *Witness    找到的见证人
+*/
+func (this *WitnessChain) FindPreWitnessForBlock(preBlockHash []byte) *Witness {
+	//新的区块只能从未确认的区块和之前的一个已经确认的组开始往后链接区块
+	//第一步：找到未确认区块之前的一个已经确认的组
+	currentGroup := this.witnessGroup //当前未确认的组
+	for {
+		if currentGroup.BlockGroup != nil {
+			break
+		}
+		if currentGroup.PreGroup == nil {
+			engine.Log.Info("find the group %+v", currentGroup)
+			return nil
+		}
+		currentGroup = currentGroup.PreGroup
+	}
+	// engine.Log.Info("找到的组 %+v", currentGroup)
+
+	//第二步：找出前置区块
+	for currentGroup != nil {
+		for _, one := range currentGroup.Witness {
+			if one.Block == nil {
+				continue
+			}
+			if bytes.Equal(one.Block.Id, preBlockHash) {
+				return one
+			}
+		}
+		currentGroup = currentGroup.NextGroup
+	}
+
+	engine.Log.Info("find the group %+v", currentGroup)
+	return nil
+}
+
+/*
+	检查
+*/
+func (this *WitnessChain) CheckWitnessBuildBlockTime(bhvo *BlockHeadVO) bool {
+	return true
+}
+
+/*
+	是否超出了已确定的备用见证人组高度
+	@return    bool    是否超出了。true:=超出了;false:=未超出;
+*/
+// func (this *WitnessChain) IsFutureWitnessGroupChain(bhvo *BlockHeadVO) bool {
+
+// }
+
+/*
+	通过新区块，在未出块的见证人组中找到这个见证人
+	@return    *Witness    找到的见证人
+	@return    bool        是否跳过的组太多，而未查到此组的见证人。true:=跳过太多了;false:=并没有;
+*/
+func (this *WitnessChain) FindWitnessForBlockOnly(bhvo *BlockHeadVO) (*Witness, bool) {
+	engine.Log.Info("find group height:%d this.witnessGroup:%d", bhvo.BH.GroupHeight, this.witnessGroup.Height)
+	//找到组高度对应的组
+	currentGroup := this.witnessGroup
+	for currentGroup != nil {
+		if currentGroup.Height < bhvo.BH.GroupHeight {
+			// engine.Log.Info("设置已出的块 333333333333333333 %d", group.Height)
+			currentGroup = currentGroup.NextGroup
+			continue
+		}
+		if currentGroup.Height > bhvo.BH.GroupHeight {
+			// engine.Log.Info("组高度不同 %d %d", currentGroup.Height, bhvo.BH.GroupHeight)
+			return nil, false
+		}
+		break
+	}
+
+	//跳过的组高度太多，则不能在备用见证人组中查找到
+	if currentGroup == nil {
+		// engine.Log.Info("跳过的组高度太多，则不能在备用见证人组中查找到")
+		return nil, true
+	}
+	// engine.Log.Info("出的块:%d :%d 见证人组高度:%d", bhvo.BH.GroupHeight, bhvo.BH.Height, currentGroup.Height)
+	if bhvo.BH.Height < config.WitnessOrderCorrectEnd && bhvo.BH.Height > config.WitnessOrderCorrectStart {
+		// engine.Log.Info("在范围内")
+		//找到组中对应的见证人，此高度内，随便分配个见证人给他
+		for _, one := range currentGroup.Witness {
+			// engine.Log.Info("见证人one:%+v", one)
+			if one.Block != nil {
+				// engine.Log.Info("本组有块了 group:%d height:%d", one.Block.Group.Height, one.Block.Height)
+				continue
+			}
+			// engine.Log.Info("返回这个见证人见证人one:%+v", one)
+			return one, false
+		}
+	}
+
+	//找到组中对应的见证人
+	for _, one := range currentGroup.Witness {
+		// engine.Log.Info("设置已出的块，对比一下 %s %s", bhvo.BH.Witness.B58String(), one.Addr.B58String())
+		if bytes.Equal(bhvo.BH.Witness, *one.Addr) {
+			//找到这个见证人了
+			return one, false
+		}
+	}
+	return nil, false
+}
+
+/*
+	检查区块是否已经导入过了
+	@return    bool        是否已经导入过了
+*/
+func (this *WitnessChain) CheckRepeatImportBlock(bhvo *BlockHeadVO) bool {
+	//找到组高度对应的组
+	currentGroup := this.witnessGroup
+	for currentGroup != nil {
+		if currentGroup.Height < bhvo.BH.GroupHeight {
+			currentGroup = currentGroup.NextGroup
+			continue
+		}
+		if currentGroup.Height > bhvo.BH.GroupHeight {
+			currentGroup = currentGroup.PreGroup
+			continue
+		}
+		break
+	}
+	if currentGroup == nil {
+		return false
+	}
+	//如果该组已经构建过了，则判定为已经导入过了
+	if currentGroup.IsBuildGroup {
+		engine.Log.Info("this group is build: %d", currentGroup.Height)
+		return true
+	}
+
+	if bhvo.BH.Height < config.WitnessOrderCorrectEnd && bhvo.BH.Height > config.WitnessOrderCorrectStart {
+		// engine.Log.Info("在范围内")
+		//找到组中对应的见证人，此高度内，随便分配个见证人给他
+		for _, one := range currentGroup.Witness {
+			// engine.Log.Info("见证人one:%+v", one)
+			if one.Block != nil {
+				// engine.Log.Info("本组有块了 group:%d height:%d", one.Block.Group.Height, one.Block.Height)
+				continue
+			}
+			// engine.Log.Info("返回这个见证人见证人one:%+v", one)
+			return false
+		}
+	}
+
+	for _, one := range currentGroup.Witness {
+		if bytes.Equal(*one.Addr, bhvo.BH.Witness) && one.Block != nil {
+			engine.Log.Info("this block is exist groupHeight:%d blockGroup:%d blockHeight:%d", currentGroup.Height, one.Block.Group.Height, one.Block.Height)
+			return true
+		}
+	}
+	return false
+}
+
+/*
+	检查区块是否分叉
+	@return    *Witness    从此见证人开始分叉
+	@return    bool        是否有分叉
+*/
+func (this *WitnessChain) CheckBifurcationBlock(groupHeight, blockHeight uint64, preBlockHash []byte) (*Witness, bool, bool) {
+	return nil, false, false
 }
 
 /*
@@ -888,37 +1530,70 @@ func (this *WitnessChain) FindWitnessForBlock(bhvo *BlockHeadVO) (*Witness, bool
 		// engine.Log.Info("设置已出的块 2222222222222222222 %d", group.Height)
 		if group.Height < bhvo.BH.GroupHeight {
 			// engine.Log.Info("设置已出的块 333333333333333333 %d", group.Height)
-			continue
+			if group.NextGroup != nil {
+				continue
+			}
+			if utils.GetNow() < bhvo.BH.Time {
+				continue
+			}
+			// engine.Log.Info("开始统计之前的区块 %v %v", this.chain.SyncBlockFinish, bhvo.FromBroadcast)
+			//如果当前同步还没完成，并且收到广播的区块，不能导入
+			// if !this.chain.SyncBlockFinish && !bhvo.FromBroadcast {
+			// 	//先统计之前的区块
+			// 	for buildGroup := group; buildGroup != nil && buildGroup.BlockGroup == nil; buildGroup = buildGroup.PreGroup {
+			// 		buildGroup.BuildGroup()
+			// 	}
+			// 	this.CompensateWitnessGroupByGroupHeight(bhvo.BH.GroupHeight)
+			// }
 		}
 		if group.Height > bhvo.BH.GroupHeight {
 			// engine.Log.Info("设置已出的块 4444444444444444444 %d", group.Height)
 			// engine.Log.Warn("不能导入之前已经确认的块")
 			return nil, false
 		}
-		// engine.Log.Info("设置已出的块 55555555555555555 %d", group.Height)
-		for _, one := range group.Witness {
-			// engine.Log.Info("设置已出的块，对比一下 %s %s", bhvo.BH.Witness.B58String(), one.Addr.B58String())
-			if !bytes.Equal(bhvo.BH.Witness, *one.Addr) {
-				// fmt.Println("-=-=-=-=-=对比下一个1", one.Block, one.BlockHeight, one.Group.Height, bhvo.BH.Witness.B58String(), one.Addr.B58String())
-				continue
-			}
-			now := utils.GetNow() //time.Now().Unix()
-			//是未来的一个时间，直接退出
-			if one.CreateBlockTime > now+config.Mining_block_time {
 
-				// engine.Log.Info("是未来的一个时间，直接退出 %s %s %s", time.Unix(one.CreateBlockTime, 0).Format("2006-01-02 15:04:05"),
-				// 	time.Unix(bhvo.BH.Time, 0).Format("2006-01-02 15:04:05"), time.Unix(now, 0).Format("2006-01-02 15:04:05"))
-
+		if bhvo.BH.Height < config.WitnessOrderCorrectEnd && bhvo.BH.Height > config.WitnessOrderCorrectStart {
+			// engine.Log.Info("在范围内")
+			//找到组中对应的见证人，此高度内，随便分配个见证人给他
+			for _, one := range group.Witness {
+				// engine.Log.Info("见证人one:%+v", one)
+				if one.Block != nil {
+					// engine.Log.Info("本组有块了 group:%d height:%d", one.Block.Group.Height, one.Block.Height)
+					continue
+				}
+				// engine.Log.Info("返回这个见证人见证人one:%+v", one)
+				//找到这个见证人了
+				witness = one
+				// engine.Log.Info("找到这个见证人了")
 				break
 			}
+		} else {
+			// engine.Log.Info("设置已出的块 55555555555555555 %d", group.Height)
+			for _, one := range group.Witness {
+				// engine.Log.Info("设置已出的块，对比一下 %s %s", bhvo.BH.Witness.B58String(), one.Addr.B58String())
+				if !bytes.Equal(bhvo.BH.Witness, *one.Addr) {
+					// fmt.Println("-=-=-=-=-=对比下一个1", one.Block, one.BlockHeight, one.Group.Height, bhvo.BH.Witness.B58String(), one.Addr.B58String())
+					continue
+				}
+				now := utils.GetNow()
+				//是未来的一个时间，直接退出
+				if one.CreateBlockTime > now+config.Mining_block_time {
 
-			// engine.Log.Info("设置已出的块 666666666666666 %d", group.Height)
+					engine.Log.Warn("是未来的一个时间，直接退出 预约%s 出块%s 当前%s", time.Unix(one.CreateBlockTime, 0).Format("2006-01-02 15:04:05"),
+						time.Unix(bhvo.BH.Time, 0).Format("2006-01-02 15:04:05"), time.Unix(now, 0).Format("2006-01-02 15:04:05"))
 
-			//找到这个见证人了
-			witness = one
-			// engine.Log.Info("找到这个见证人了")
-			break
+					break
+				}
+
+				// engine.Log.Info("设置已出的块 666666666666666 %d", group.Height)
+
+				//找到这个见证人了
+				witness = one
+				// engine.Log.Info("找到这个见证人了")
+				break
+			}
 		}
+
 		if witness != nil {
 			// engine.Log.Info("找到这个见证人了 退出")
 			break
@@ -935,8 +1610,15 @@ func (this *WitnessChain) FindWitnessForBlock(bhvo *BlockHeadVO) (*Witness, bool
 */
 func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 
-	// engine.Log.Info("设置已出的块 1111111111111111111 %d %d %s", bhvo.BH.GroupHeight, bhvo.BH.Height, time.Unix(bhvo.BH.Time, 0).Format("2006-01-02 15:04:05"))
+	// start := time.Now()
+	// engine.Log.Info("Set blocks 1111111111111111111 %d %d %s", bhvo.BH.GroupHeight, bhvo.BH.Height, time.Unix(bhvo.BH.Time, 0).Format("2006-01-02 15:04:05"))
 
+	//避免最新见证人组中区块未确认，导致导入区块不连续，因此在导入区块之前，先统计之前的区块组
+	// if !this.chain.SyncBlockFinish {
+
+	// }
+
+	// engine.Log.Info("设置已出的块 111 %v", bhvo.FromBroadcast)
 	//找到这个出块的见证人
 	witness, needSync := this.FindWitnessForBlock(bhvo)
 	if witness != nil && witness.Block != nil {
@@ -944,53 +1626,9 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 		engine.Log.Warn("You don't need to set it again if it's already set")
 		return false
 	}
-
-	//	var witness *Witness
-	//	for group := this.witnessGroup; group != nil; group = group.NextGroup {
-	//		// engine.Log.Info("设置已出的块 2222222222222222222 %d", group.Height)
-	//		if group.Height < bhvo.BH.GroupHeight {
-	//			// engine.Log.Info("设置已出的块 333333333333333333 %d", group.Height)
-	//			continue
-	//		}
-	//		if group.Height > bhvo.BH.GroupHeight {
-	//			// engine.Log.Info("设置已出的块 4444444444444444444 %d", group.Height)
-	//			engine.Log.Warn("不能导入之前已经确认的块")
-	//			return false
-	//		}
-	//		// engine.Log.Info("设置已出的块 55555555555555555 %d", group.Height)
-	//		for _, one := range group.Witness {
-	//			// engine.Log.Info("设置已出的块，对比一下 %s %s", bhvo.BH.Witness.B58String(), one.Addr.B58String())
-	//			if !bytes.Equal(bhvo.BH.Witness, *one.Addr) {
-	//				// fmt.Println("-=-=-=-=-=对比下一个1", one.Block, one.BlockHeight, one.Group.Height, bhvo.BH.Witness.B58String(), one.Addr.B58String())
-	//				continue
-	//			}
-	//			now := utils.GetNow() //time.Now().Unix()
-	//			//是未来的一个时间，直接退出
-	//			if one.CreateBlockTime > now+config.Mining_block_time {
-
-	//				// engine.Log.Info("是未来的一个时间，直接退出 %s %s %s", time.Unix(one.CreateBlockTime, 0).Format("2006-01-02 15:04:05"),
-	//				// 	time.Unix(bhvo.BH.Time, 0).Format("2006-01-02 15:04:05"), time.Unix(now, 0).Format("2006-01-02 15:04:05"))
-
-	//				break
-	//			}
-
-	//			// engine.Log.Info("设置已出的块 666666666666666 %d", group.Height)
-	//			if one.Block != nil {
-	//				engine.Log.Warn("已经设置了就不需要重复设置了")
-	//				//已经设置了就不需要重复设置了
-	//				return false
-	//			}
-
-	//			//找到这个见证人了
-	//			witness = one
-	//			// engine.Log.Info("找到这个见证人了")
-	//			break
-	//		}
-	//		if witness != nil {
-	//			// engine.Log.Info("找到这个见证人了 退出")
-	//			break
-	//		}
-	//	}
+	// engine.Log.Info("Witness group found:%d height:%d", witness.Group.Height, witness.BlockHeight)
+	// engine.Log.Info("SetWitnessBlock 11111111 %s", time.Now().Sub(start))
+	//找到见证人了，区块高度又是连续的，如果组高度增加，则统计之前的组
 
 	// engine.Log.Info("开始设置见证人出块 33333333333")
 	if witness == nil {
@@ -999,7 +1637,7 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 
 		if needSync {
 			//从邻居节点同步
-			this.chain.NoticeLoadBlockForDB(false)
+			this.chain.NoticeLoadBlockForDB()
 		}
 		return false
 	}
@@ -1012,25 +1650,76 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 		return false
 	}
 
+	// engine.Log.Info("SetWitnessBlock 22222222222 %s", time.Now().Sub(start))
+
+	// engine.Log.Info("开始设置见证人出块 55555555555555")
 	if bhvo.BH.Height != config.Mining_block_start_height {
+		//查询排除的交易
+		// excludeTx := make([]config.ExcludeTx, 0)
+		// for i, one := range config.Exclude_Tx {
+		// 	if bhvo.BH.Height == one.Height {
+		// 		excludeTx = append(excludeTx, config.Exclude_Tx[i])
+		// 	}
+		// }
 
 		//查找出未确认的块
-		preBlock, blocks := witness.FindUnconfirmedBlock()
+		preBlock, blocks := witness.CheckUnconfirmedBlock(&bhvo.BH.Previousblockhash)
 
+		//检查当前区块高度是否连续
+		if bhvo.BH.Height-1 != preBlock.Height {
+			engine.Log.Warn("block height not continuity height:%d inport height:%d", preBlock.Height, bhvo.BH.Height)
+			engine.Log.Warn("%+v %+v", witness, bhvo.BH)
+			return false
+		}
+		// engine.Log.Info("SetWitnessBlock 3333333 %s", time.Now().Sub(start))
 		//检查区块中的交易是否正确
 		for _, one := range bhvo.Txs {
-			//自己的未打包交易，是已经验证过的合法交易，已经验证过就不需要重复验证了
-			_, ok := this.chain.transactionManager.unpacked.Load(hex.EncodeToString(*one.GetHash()))
-			if ok {
-				continue
-			}
-			err := one.Check()
+			//排除的交易不验证
+			// for _, two := range excludeTx {
+			// 	if bytes.Equal(two.TxByte, *one.GetHash()) {
+			// 		continue
+			// 	}
+			// }
+
+			err := one.CheckLockHeight(bhvo.BH.Height)
 			if err != nil {
-				engine.Log.Error("Illegal transaction %s %s", hex.EncodeToString(*one.GetHash()), err.Error())
+				engine.Log.Error("Illegal transaction 111 %s %s", hex.EncodeToString(*one.GetHash()), err.Error())
 				//交易不合法
 				return false
 			}
+			err = one.CheckFrozenHeight(bhvo.BH.Height, bhvo.BH.Time)
+			if err != nil {
+				engine.Log.Error("Illegal transaction 222 %s %s", hex.EncodeToString(*one.GetHash()), err.Error())
+				//交易不合法
+				return false
+			}
+
+			//自己的未打包交易，是已经验证过的合法交易，已经验证过就不需要重复验证了
+			// _, ok := this.chain.transactionManager.unpacked.Load(hex.EncodeToString(*one.GetHash()))
+			_, ok := this.chain.transactionManager.unpacked.Load(utils.Bytes2string(*one.GetHash()))
+			if ok {
+				continue
+			}
+
+			// engine.Log.Info("SetWitnessBlock 444444444 %s", time.Now().Sub(start))
+
+			if bhvo.BH.Height > config.Mining_block_start_height+config.Mining_block_start_height_jump {
+
+				err = one.Check()
+				// 	runtime.GC()
+				if err != nil {
+					engine.Log.Error("Illegal transaction 333 %s %s", hex.EncodeToString(*one.GetHash()), err.Error())
+					//交易不合法
+					return false
+				}
+			}
+
+			// engine.Log.Info("SetWitnessBlock 55555555 %s", time.Now().Sub(start))
 		}
+		// if len(bhvo.Txs) > 0 {
+		// 	runtime.GC()
+		// }
+		// engine.Log.Info("SetWitnessBlock 66666666666 %s", time.Now().Sub(start))
 
 		//检查未确认的块中的交易是否正确
 		//未确认的交易
@@ -1038,6 +1727,7 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 		//排除已经打包的交易
 		exclude := make(map[string]string)
 		for _, one := range blocks {
+			// engine.Log.Info("设置见证人生成的块 SetWitnessBlock")
 			_, txs, err := one.LoadTxs()
 			if err != nil {
 				engine.Log.Warn("not find transaction %s", err.Error())
@@ -1045,10 +1735,13 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 				return false
 			}
 			for _, txOne := range *txs {
-				exclude[hex.EncodeToString(*txOne.GetHash())] = ""
+				// exclude[hex.EncodeToString(*txOne.GetHash())] = ""
+				exclude[utils.Bytes2string(*txOne.GetHash())] = ""
 				unacknowledgedTxs = append(unacknowledgedTxs, txOne)
 			}
 		}
+
+		// engine.Log.Info("SetWitnessBlock 44444444444444 %s", time.Now().Sub(start))
 
 		sizeTotal := uint64(0) //保存区块所有交易大小
 		for i, one := range bhvo.Txs {
@@ -1063,97 +1756,99 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 		}
 		//判断交易总大小
 		if sizeTotal > config.Block_size_max {
-			engine.Log.Warn("Transaction over total size %d", sizeTotal)
+			engine.Log.Error("此包大小 %d 交易总量 %d", sizeTotal, len(bhvo.Txs))
+			engine.Log.Warn("Transaction over size %d", sizeTotal)
 			//这里用continue是因为，排在后面的交易有可能占用空间小，可以打包到区块中去，使交易费最大化。
 			return false
 		}
 
+		// engine.Log.Info("SetWitnessBlock 555555555555 %s", time.Now().Sub(start))
+
 		//检查区块奖励是否正确
-		if witness.WitnessBackupGroup != preBlock.witness.WitnessBackupGroup {
-			engine.Log.Info("check reward")
-			vouts := preBlock.witness.WitnessBackupGroup.BuildRewardVouts(blocks)
-			//对比vouts中分配比例是否正确
-			haveReward := false //标记是否有区块奖励
-			for _, one := range bhvo.Txs {
-				if one.Class() != config.Wallet_tx_type_mining {
-					continue
-				}
-				if haveReward {
-					//如果一个块里有多个奖励交易，则不合法
-					engine.Log.Warn("Illegal if there are multiple reward transactions in a block")
-					return false
-				}
-				haveReward = true
+		if bhvo.BH.Height > config.Mining_block_start_height+config.Mining_block_start_height_jump {
 
-				//对比奖励是否正确
-				m := make(map[string]uint64) //key:string=奖励地址;value:uint64=奖励金额;
-				for _, one := range *one.GetVout() {
-					m[one.Address.B58String()] = one.Value
-				}
-				for _, one := range vouts {
-					value, ok := m[one.Address.B58String()]
-					if !ok {
-						//没有这个人的奖励，则验证不通过
-						engine.Log.Warn("Without this person's reward, the verification fails %s", one.Address.B58String())
+			if witness.WitnessBackupGroup != preBlock.witness.WitnessBackupGroup {
+				// engine.Log.Info("check reward")
+				// <<<<<<< HEAD
+				vouts := preBlock.witness.WitnessBackupGroup.BuildRewardVouts(blocks, bhvo.BH.Height, &bhvo.BH.Previousblockhash, preBlock)
+				// =======
+				// 				vouts := preBlock.witness.WitnessBackupGroup.BuildRewardVouts(blocks, bhvo.BH.Height)
+				// >>>>>>> dev
+
+				//对比vouts中分配比例是否正确
+				haveReward := false //标记是否有区块奖励
+				for _, one := range bhvo.Txs {
+					if one.Class() != config.Wallet_tx_type_mining {
+						continue
+					}
+					if haveReward {
+						//如果一个块里有多个奖励交易，则不合法
+						engine.Log.Warn("Illegal if there are multiple reward transactions in a block")
 						return false
 					}
-					if value != one.Value {
-						//奖励数额不正确，则验证不通过
-						engine.Log.Warn("If the reward amount is incorrect, the verification fails %d %d", value, one.Value)
+					haveReward = true
+
+					//对比奖励是否正确
+					m := make(map[string]uint64) //key:string=奖励地址;value:uint64=奖励金额;
+					for _, one := range *one.GetVout() {
+						m[utils.Bytes2string(one.Address)+strconv.Itoa(int(one.FrozenHeight))] = one.Value
+					}
+					for _, one := range vouts {
+						// engine.Log.Info("%+v", one)
+						value, ok := m[utils.Bytes2string(one.Address)+strconv.Itoa(int(one.FrozenHeight))]
+						if !ok {
+							//没有这个人的奖励，则验证不通过
+							engine.Log.Warn("Without this person's reward, the verification fails %s", one.Address.B58String())
+							return false
+						}
+						if value != one.Value {
+							//奖励数额不正确，则验证不通过
+							engine.Log.Warn("If the reward amount is incorrect, the verification fails %s %d want:%d", one.Address.B58String(), value, one.Value)
+							return false
+						}
+					}
+				}
+				if !haveReward {
+					//如果没有区块奖励，则区块不合法
+					engine.Log.Warn("If there is no block reward, the block is illegal")
+					return false
+				}
+			} else {
+				//判断每组不能有多个区块奖励交易
+				for _, one := range bhvo.Txs {
+					if one.Class() == config.Wallet_tx_type_mining {
+						engine.Log.Warn("每组不能有多个区块奖励交易")
 						return false
 					}
 				}
 			}
-			if !haveReward {
-				//如果没有区块奖励，则区块不合法
-				engine.Log.Warn("If there is no block reward, the block is illegal")
-				return false
-			}
-		} else {
-			//判断每组不能有多个区块奖励交易
-			for _, one := range bhvo.Txs {
-				if one.Class() == config.Wallet_tx_type_mining {
-					engine.Log.Warn("每组不能有多个区块奖励交易")
-					return false
-				}
-			}
-
 		}
-
 	}
+	// engine.Log.Info("SetWitnessBlock 6666666666666 %s", time.Now().Sub(start))
+
+	// engine.Log.Info("开始设置见证人出块 66666666666666")
 	//找到见证人了，不管这个见证人有没有开始出块，给他发送一个停止出块的信号
 	select {
 	case witness.StopMining <- false:
 	default:
 	}
-	// engine.Log.Info("开始设置见证人出块 55555555555")
 	//创建新的块
 	newBlock := new(Block)
 	newBlock.Id = bhvo.BH.Hash
 	newBlock.Height = bhvo.BH.Height
 	newBlock.PreBlockID = bhvo.BH.Previousblockhash
-	// newBlock.PreBlock = make([]*Block, 0)
-	// newBlock.NextBlock = make([]*Block, 0)
-
-	// newBlock.PreBlock = append()
 
 	//找到了见证人，将见证人标记为已经出块
 	witness.Block = newBlock
 	witness.Block.witness = witness
 
-	// engine.Log.Info("找到这个见证人了 111 %d %s %v", witness.Group.Height, witness.Addr.B58String(), witness.Block)
-	// if witness.PreWitness != nil {
-	// 	engine.Log.Info("找到上一个见证人了 111 %d %s %v", witness.Group.Height, witness.Addr.B58String(), witness.PreWitness.Block)
-	// }
-
 	//整理已出区块之间的前后关系
-	witness.Group.CollationRelationship()
+	// witness.Group.CollationRelationship(nil)
+	witness.Group.SelectionChainOld()
+
+	// engine.Log.Info("SetWitnessBlock 7777777777777 %s", time.Now().Sub(start))
 
 	// engine.Log.Info("找到这个见证人了 222 %d %s %v", witness.Group.Height, witness.Addr.B58String(), witness.Block)
-
-	// fmt.Println("开始设置见证人出块 2", witness)
-
-	// fmt.Println("111", this.witnessGroup.Witness[0])
 
 	//如果是创始区块，则设置见证人的出块时间
 	if bhvo.BH.Height == config.Mining_block_start_height {
@@ -1161,53 +1856,7 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 	}
 
 	this.chain.SetPulledStates(bhvo.BH.Height)
-
-	// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用")
-
-	//将新导入进来的交易UTXO输出标记为未使用
-	for i, one := range bhvo.Txs {
-		have := false
-		for j, vout := range *one.GetVout() {
-			// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用 111111 %v", vout.Tx)
-			if vout.Tx != nil || len(vout.Tx) <= 0 {
-				// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用 22222222 %v", vout.Tx)
-				// vout.Tx = nil
-				(*one.GetVout())[j].Tx = nil
-				have = true
-			}
-			// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用 333333 %v", vout.Tx)
-		}
-		if !have {
-			continue
-		}
-		// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用 4444444")
-		bs, err := bhvo.Txs[i].Json()
-		if err != nil {
-			engine.Log.Error("Save transaction JSON format error %s", err.Error())
-			continue
-		}
-		// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用 55555555 %s", string(*bs))
-		err = db.Save(*bhvo.Txs[i].GetHash(), bs)
-		if err != nil {
-			engine.Log.Error("Error saving transaction to database %s", err.Error())
-			continue
-		}
-		// engine.Log.Info("将新导入进来的交易UTXO输出标记为未使用 66666666")
-	}
-
-	// bs, err := db.Find(bhvo.BH.Hash)
-	// if err != nil {
-	// 	return true
-	// }
-	// bh, err := ParseBlockHead(bs)
-	// if err != nil {
-	// 	return true
-	// }
-	// for _, one := range bh.Tx {
-	// 	bs, _ := db.Find(one)
-	// 	engine.Log.Info("打印首块交易 %s", string(*bs))
-	// }
-
+	// engine.Log.Info("开始设置见证人出块 777777777777777")
 	return true
 
 }
@@ -1218,194 +1867,195 @@ func (this *WitnessChain) SetWitnessBlock(bhvo *BlockHeadVO) bool {
 	只有见证人方式出块才统计
 	组人数乘以每块奖励，再分配给实际出块的人
 */
-func (this *WitnessGroup) CountReward(blockHeight uint64) *Tx_reward {
+// func (this *WitnessGroup) CountReward(blockHeight uint64) *Tx_reward {
 
-	vouts := make([]Vout, 0)
+// 	vouts := make([]*Vout, 0)
 
-	//统计本组股权和交易手续费
-	witnessPos := uint64(0) //见证人押金
-	votePos := uint64(0)    //投票者押金
-	allPos := uint64(0)     //股权数量
-	allGas := uint64(0)     //计算交易手续费
-	allReward := uint64(0)  //本组奖励数量
-	// txs := make([]TxItr, 0)
-	for _, one := range this.Witness {
-		if one.Block == nil {
-			continue
-		}
+// 	//统计本组股权和交易手续费
+// 	witnessPos := uint64(0) //见证人押金
+// 	votePos := uint64(0)    //投票者押金
+// 	allPos := uint64(0)     //股权数量
+// 	allGas := uint64(0)     //计算交易手续费
+// 	allReward := uint64(0)  //本组奖励数量
+// 	// txs := make([]TxItr, 0)
+// 	for _, one := range this.Witness {
+// 		if one.Block == nil {
+// 			continue
+// 		}
 
-		//计算交易手续费
-		_, txs, _ := one.Block.LoadTxs()
-		for _, one := range *txs {
-			allGas = allGas + one.GetGas()
-		}
+// 		//计算交易手续费
+// 		// engine.Log.Info("构建本组中的见证人出块奖励 CountReward")
+// 		_, txs, _ := one.Block.LoadTxs()
+// 		for _, one := range *txs {
+// 			allGas = allGas + one.GetGas()
+// 		}
 
-		//计算股权
-		allPos = allPos + (one.Score * 2) //计算股权的时候，见证人的股权要乘以2
-		witnessPos = witnessPos + one.Score
-		for _, vote := range one.Votes {
-			allPos = allPos + vote.Scores
-			votePos = votePos + vote.Scores
-		}
+// 		//计算股权
+// 		allPos = allPos + (one.Score * 2) //计算股权的时候，见证人的股权要乘以2
+// 		witnessPos = witnessPos + one.Score
+// 		for _, vote := range one.Votes {
+// 			allPos = allPos + vote.Scores
+// 			votePos = votePos + vote.Scores
+// 		}
 
-		//计算区块奖励，第一个块产出80个币
-		//每增加一定块数，产出减半，直到为0
-		//最多减半9次，第10次减半后产出为0
-		//		oneReward := uint64(config.Mining_reward)
-		//		if one.Block.Height <= config.Mining_lastblock_reward {
-		//			n := one.Block.Height / config.Mining_block_cycle
-		//			for i := uint64(0); i < n; i++ {
-		//				oneReward = oneReward / 2
-		//			}
-		//		} else {
-		//			oneReward = 0
-		//		}
+// 		//计算区块奖励，第一个块产出80个币
+// 		//每增加一定块数，产出减半，直到为0
+// 		//最多减半9次，第10次减半后产出为0
+// 		//		oneReward := uint64(config.Mining_reward)
+// 		//		if one.Block.Height <= config.Mining_lastblock_reward {
+// 		//			n := one.Block.Height / config.Mining_block_cycle
+// 		//			for i := uint64(0); i < n; i++ {
+// 		//				oneReward = oneReward / 2
+// 		//			}
+// 		//		} else {
+// 		//			oneReward = 0
+// 		//		}
 
-		//按照发行总量及减半周期计算出块奖励
-		oneReward := config.ClacRewardForBlockHeight(one.Block.Height)
-		allReward = allReward + oneReward
-	}
+// 		//按照发行总量及减半周期计算出块奖励
+// 		oneReward := config.ClacRewardForBlockHeight(one.Block.Height)
+// 		allReward = allReward + oneReward
+// 	}
 
-	//--------------所有交易手续费分给云存储节点---------------
-	// cloudReward := uint64(0)
-	nameinfo := name.FindNameToNet(config.Name_store)
-	if nameinfo != nil && len(nameinfo.AddrCoins) != 0 {
-		addrCoin := nameinfo.AddrCoins[utils.GetRandNum(int64(len(nameinfo.AddrCoins)))]
-		// cloudReward = uint64(float64(allReward) * 0.8)
-		vout := Vout{
-			Value:   allGas,
-			Address: addrCoin,
-		}
-		vouts = append(vouts, vout)
-		// allReward = allReward - cloudReward
-	}
+// 	//--------------所有交易手续费分给云存储节点---------------
+// 	// cloudReward := uint64(0)
+// 	nameinfo := name.FindNameToNet(config.Name_store)
+// 	if nameinfo != nil && len(nameinfo.AddrCoins) != 0 {
+// 		addrCoin := nameinfo.AddrCoins[utils.GetRandNum(int64(len(nameinfo.AddrCoins)))]
+// 		// cloudReward = uint64(float64(allReward) * 0.8)
+// 		vout := Vout{
+// 			Value:   allGas,
+// 			Address: addrCoin,
+// 		}
+// 		vouts = append(vouts, &vout)
+// 		// allReward = allReward - cloudReward
+// 	}
 
-	//---------------------------------------------------
+// 	//---------------------------------------------------
 
-	// allReward = allReward + allGas
+// 	// allReward = allReward + allGas
 
-	//计算见证人奖励
-	// witnessRatio := int64(config.Mining_reward_witness_ratio * 100)
-	// witnessReward := new(big.Int).Mul(big.NewInt(int64(allReward)), big.NewInt(witnessRatio))
-	// witnessReward = new(big.Int).Div(witnessReward, big.NewInt(100))
-	countReward := uint64(0)
-	for _, one := range this.Witness {
-		//分配奖励是所有见证人组成员都要分配
-		temp := new(big.Int).Mul(big.NewInt(int64(allReward)), big.NewInt(int64(one.Score*2)))
-		value := new(big.Int).Div(temp, big.NewInt(int64(allPos)))
-		//奖励为0的矿工交易不写入区块
-		if value.Uint64() <= 0 {
-			continue
-		}
-		vout := Vout{
-			Value:   value.Uint64(),
-			Address: *one.Addr,
-		}
-		vouts = append(vouts, vout)
-		countReward = countReward + value.Uint64()
-		//给投票者分配奖励
-		for _, two := range one.Votes {
-			temp := new(big.Int).Mul(big.NewInt(int64(allReward)), big.NewInt(int64(two.Scores)))
-			value := new(big.Int).Div(temp, big.NewInt(int64(allPos)))
-			//奖励为0的矿工交易不写入区块
-			if value.Uint64() <= 0 {
-				continue
-			}
-			vout := Vout{
-				Value:   value.Uint64(),
-				Address: *two.Addr,
-			}
-			vouts = append(vouts, vout)
-			countReward = countReward + value.Uint64()
-		}
-	}
-	//平均数不能被整除时候，剩下的给最后一个出块的见证人
-	if len(vouts) > 0 {
-		vouts[len(vouts)-1].Value = vouts[len(vouts)-1].Value + (allReward - countReward)
-	}
+// 	//计算见证人奖励
+// 	// witnessRatio := int64(config.Mining_reward_witness_ratio * 100)
+// 	// witnessReward := new(big.Int).Mul(big.NewInt(int64(allReward)), big.NewInt(witnessRatio))
+// 	// witnessReward = new(big.Int).Div(witnessReward, big.NewInt(100))
+// 	countReward := uint64(0)
+// 	for _, one := range this.Witness {
+// 		//分配奖励是所有见证人组成员都要分配
+// 		temp := new(big.Int).Mul(big.NewInt(int64(allReward)), big.NewInt(int64(one.Score*2)))
+// 		value := new(big.Int).Div(temp, big.NewInt(int64(allPos)))
+// 		//奖励为0的矿工交易不写入区块
+// 		if value.Uint64() <= 0 {
+// 			continue
+// 		}
+// 		vout := Vout{
+// 			Value:   value.Uint64(),
+// 			Address: *one.Addr,
+// 		}
+// 		vouts = append(vouts, &vout)
+// 		countReward = countReward + value.Uint64()
+// 		//给投票者分配奖励
+// 		for _, two := range one.Votes {
+// 			temp := new(big.Int).Mul(big.NewInt(int64(allReward)), big.NewInt(int64(two.Scores)))
+// 			value := new(big.Int).Div(temp, big.NewInt(int64(allPos)))
+// 			//奖励为0的矿工交易不写入区块
+// 			if value.Uint64() <= 0 {
+// 				continue
+// 			}
+// 			vout := Vout{
+// 				Value:   value.Uint64(),
+// 				Address: *two.Addr,
+// 			}
+// 			vouts = append(vouts, &vout)
+// 			countReward = countReward + value.Uint64()
+// 		}
+// 	}
+// 	//平均数不能被整除时候，剩下的给最后一个出块的见证人
+// 	if len(vouts) > 0 {
+// 		vouts[len(vouts)-1].Value = vouts[len(vouts)-1].Value + (allReward - countReward)
+// 	}
 
-	// //计算投票者的奖励
-	// voteReward := allReward - witnessReward.Uint64()
-	// countReward = uint64(0)
-	// for _, one := range this.Witness {
-	// 	for _, two := range one.Votes {
-	// 		temp := new(big.Int).Mul(big.NewInt(int64(voteReward)), big.NewInt(int64(two.Score)))
-	// 		value := new(big.Int).Div(temp, big.NewInt(int64(votePos)))
-	// 		//奖励为0的矿工交易不写入区块
-	// 		if value.Uint64() <= 0 {
-	// 			continue
-	// 		}
-	// 		vout := Vout{
-	// 			Value:   value.Uint64(),
-	// 			Address: *two.Addr,
-	// 		}
-	// 		vouts = append(vouts, vout)
-	// 		countReward = countReward + value.Uint64()
-	// 	}
-	// }
-	// //平均数不能被整除时候，剩下的给最后一个投票者
-	// vouts[len(vouts)-1].Value = vouts[len(vouts)-1].Value + (voteReward - countReward)
+// 	// //计算投票者的奖励
+// 	// voteReward := allReward - witnessReward.Uint64()
+// 	// countReward = uint64(0)
+// 	// for _, one := range this.Witness {
+// 	// 	for _, two := range one.Votes {
+// 	// 		temp := new(big.Int).Mul(big.NewInt(int64(voteReward)), big.NewInt(int64(two.Score)))
+// 	// 		value := new(big.Int).Div(temp, big.NewInt(int64(votePos)))
+// 	// 		//奖励为0的矿工交易不写入区块
+// 	// 		if value.Uint64() <= 0 {
+// 	// 			continue
+// 	// 		}
+// 	// 		vout := Vout{
+// 	// 			Value:   value.Uint64(),
+// 	// 			Address: *two.Addr,
+// 	// 		}
+// 	// 		vouts = append(vouts, vout)
+// 	// 		countReward = countReward + value.Uint64()
+// 	// 	}
+// 	// }
+// 	// //平均数不能被整除时候，剩下的给最后一个投票者
+// 	// vouts[len(vouts)-1].Value = vouts[len(vouts)-1].Value + (voteReward - countReward)
 
-	//构建输入
-	baseCoinAddr := keystore.GetCoinbase()
-	puk, ok := keystore.GetPukByAddr(baseCoinAddr)
-	if !ok {
-		return nil
-	}
-	vins := make([]Vin, 0)
-	vin := Vin{
-		Puk:  puk, //公钥
-		Sign: nil, //对上一个交易签名，是对整个交易签名（若只对输出签名，当地址和金额一样时，签名输出相同）。
-	}
-	vins = append(vins, vin)
+// 	//构建输入
+// 	baseCoinAddr := keystore.GetCoinbase()
+// 	// puk, ok := keystore.GetPukByAddr(baseCoinAddr)
+// 	// if !ok {
+// 	// 	return nil
+// 	// }
+// 	vins := make([]*Vin, 0)
+// 	vin := Vin{
+// 		Puk:  baseCoinAddr.Puk, //公钥
+// 		Sign: nil,              //对上一个交易签名，是对整个交易签名（若只对输出签名，当地址和金额一样时，签名输出相同）。
+// 	}
+// 	vins = append(vins, &vin)
 
-	var txReward *Tx_reward
-	for i := uint64(0); i < 10000; i++ {
-		base := TxBase{
-			Type:       config.Wallet_tx_type_mining, //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
-			Vin_total:  1,
-			Vin:        vins,
-			Vout_total: uint64(len(vouts)), //输出交易数量
-			Vout:       vouts,              //交易输出
-			LockHeight: blockHeight + i,    //锁定高度
-			//		CreateTime: time.Now().Unix(),            //创建时间
-		}
-		txReward = &Tx_reward{
-			TxBase: base,
-		}
+// 	var txReward *Tx_reward
+// 	for i := uint64(0); i < 10000; i++ {
+// 		base := TxBase{
+// 			Type:       config.Wallet_tx_type_mining, //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
+// 			Vin_total:  1,
+// 			Vin:        vins,
+// 			Vout_total: uint64(len(vouts)), //输出交易数量
+// 			Vout:       vouts,              //交易输出
+// 			LockHeight: blockHeight + i,    //锁定高度
+// 			//		CreateTime: time.Now().Unix(),            //创建时间
+// 		}
+// 		txReward = &Tx_reward{
+// 			TxBase: base,
+// 		}
 
-		//给输出签名，防篡改
-		for i, one := range txReward.Vin {
-			for _, key := range keystore.GetAddrAll() {
+// 		//给输出签名，防篡改
+// 		for i, one := range txReward.Vin {
+// 			for _, key := range keystore.GetAddrAll() {
 
-				puk, ok := keystore.GetPukByAddr(key)
-				if !ok {
-					return nil
-				}
+// 				puk, ok := keystore.GetPukByAddr(key.Addr)
+// 				if !ok {
+// 					return nil
+// 				}
 
-				if bytes.Equal(puk, one.Puk) {
-					_, prk, _, err := keystore.GetKeyByAddr(key, config.Wallet_keystore_default_pwd)
-					// prk, err := key.GetPriKey(pwd)
-					if err != nil {
-						return nil
-					}
-					sign := txReward.GetSign(&prk, one.Txid, one.Vout, uint64(i))
-					//				sign := pay.GetVoutsSign(prk, uint64(i))
-					txReward.Vin[i].Sign = *sign
-				}
-			}
-		}
+// 				if bytes.Equal(puk, one.Puk) {
+// 					_, prk, _, err := keystore.GetKeyByAddr(key.Addr, config.Wallet_keystore_default_pwd)
+// 					// prk, err := key.GetPriKey(pwd)
+// 					if err != nil {
+// 						return nil
+// 					}
+// 					sign := txReward.GetSign(&prk, one.Txid, one.Vout, uint64(i))
+// 					//				sign := pay.GetVoutsSign(prk, uint64(i))
+// 					txReward.Vin[i].Sign = *sign
+// 				}
+// 			}
+// 		}
 
-		txReward.BuildHash()
-		if txReward.CheckHashExist() {
-			txReward = nil
-			continue
-		} else {
-			break
-		}
-	}
-	return txReward
-}
+// 		txReward.BuildHash()
+// 		if txReward.CheckHashExist() {
+// 			txReward = nil
+// 			continue
+// 		} else {
+// 			break
+// 		}
+// 	}
+// 	return txReward
+// }
 
 /*
 	判断是否是本组首个见证人出块
@@ -1431,6 +2081,9 @@ func (this *WitnessGroup) DistributionRewards() {
 	查询见证人是否在备用见证人列表中
 */
 func (this *WitnessChain) FindWitness(addr crypto.AddressCoin) bool {
+	if this.witnessGroup == nil {
+		return false
+	}
 	witnessTemp := this.witnessGroup.Witness[0]
 	for {
 		witnessTemp = witnessTemp.NextWitness
@@ -1457,7 +2110,14 @@ func (this *Witness) syncBlockTiming() {
 	}
 	this.syncBlockOnce = new(sync.Once)
 	var syncBlock = func() {
-		go func() {
+		utils.Go(func() {
+			goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+			_, file, line, _ := runtime.Caller(0)
+			engine.AddRuntime(file, line, goroutineId)
+			defer engine.DelRuntime(file, line, goroutineId)
+			// goroutineId := utils.GetRandomDomain() + utils.TimeFormatToNanosecondStr()
+			// engine.Log.Info("add Goroutine:%s", goroutineId)
+			// defer engine.Log.Info("del Goroutine:%s", goroutineId)
 			bfw := BlockForWitness{
 				GroupHeight: this.Group.Height, //见证人组高度
 				Addr:        *this.Addr,        //见证人地址
@@ -1498,7 +2158,7 @@ func (this *Witness) syncBlockTiming() {
 
 			// engine.Log.Info("%d 同步 end", this.Group.Height)
 
-		}()
+		})
 	}
 	this.syncBlockOnce.Do(syncBlock)
 }
@@ -1509,7 +2169,8 @@ func (this *Witness) syncBlockTiming() {
 	@intervalTime    time.Duration    同步失败间隔时间
 */
 func (this *Witness) syncBlock(total int, intervalTime time.Duration, bfw *BlockForWitness) {
-	bs, err := json.Marshal(bfw)
+	bs, err := bfw.Proto()
+	// bs, err := json.Marshal(bfw)
 	if err != nil {
 		return
 	}
@@ -1528,13 +2189,14 @@ func (this *Witness) syncBlock(total int, intervalTime time.Duration, bfw *Block
 			}
 			engine.Log.Info("%d Synchronize blocks from neighbor nodes %s", this.Group.Height, broadcasts[j].B58String())
 			// engine.Log.Info("%d 555555555555555555555", this.Group.Height)
-			message, ok := message_center.SendNeighborMsg(config.MSGID_getblockforwitness, broadcasts[j], &bs)
-			if !ok {
+			message, err := message_center.SendNeighborMsg(config.MSGID_getblockforwitness, &broadcasts[j], bs)
+			if err != nil {
 				// engine.Log.Info("这个邻居节点消息发送不成功")
 				continue
 			}
 			// engine.Log.Info("%d 66666666666666666666", this.Group.Height)
-			bs := flood.WaitRequest(config.CLASS_wallet_getblockforwitness, hex.EncodeToString(message.Body.Hash), 1)
+			// bs := flood.WaitRequest(config.CLASS_wallet_getblockforwitness, hex.EncodeToString(message.Body.Hash), 1)
+			bs, _ := flood.WaitRequest(config.CLASS_wallet_getblockforwitness, utils.Bytes2string(message.Body.Hash), 1)
 			if bs == nil {
 				// engine.Log.Warn("%d 收到查询区块回复消息超时  %s", this.Group.Height, broadcasts[j].B58String())
 				// lock.Unlock()
@@ -1542,11 +2204,13 @@ func (this *Witness) syncBlock(total int, intervalTime time.Duration, bfw *Block
 			}
 			// engine.Log.Info("%d 收到查询区块回复消息  %s", this.Group.Height, broadcasts[j].B58String())
 			//导入区块
-			bhVO, err := ParseBlockHeadVO(bs)
+			bhVO, err := ParseBlockHeadVOProto(bs)
+			// bhVO, err := ParseBlockHeadVO(bs)
 			if err != nil {
 				// engine.Log.Warn("%d 收到查询区块回复消息 error: %s", this.Group.Height, err.Error())
 				continue
 			}
+			bhVO.FromBroadcast = true
 			forks.AddBlockHead(bhVO)
 			// engine.Log.Info("%d 8888888888888888888", this.Group.Height)
 			//等待导入
@@ -1556,4 +2220,69 @@ func (this *Witness) syncBlock(total int, intervalTime time.Duration, bfw *Block
 
 		time.Sleep(intervalTime)
 	}
+}
+
+/*
+	回收内存，将前n个见证人之前的见证人链删除。
+	n不是一个精确的数，大致是config.Mining_block_hash_count参数的3倍
+*/
+func (this *WitnessChain) GCWitnessOld() {
+
+	//做见证人的节点，不做社区节点，社区节点不能删除之前的区块，见证人为了减少内存，需要删除之前的区块
+	IsBackup := this.chain.witnessChain.FindWitness(keystore.GetCoinbase().Addr)
+	if !IsBackup {
+		return
+	}
+
+	total := config.Mining_block_hash_count * 3
+	currentWitnessGroup := this.witnessGroup.PreGroup
+	for {
+		//没有前置见证人组，则退出循环
+		if currentWitnessGroup == nil {
+			break
+		}
+
+		for _, one := range currentWitnessGroup.Witness {
+			if one.Block == nil {
+				continue
+			}
+			total = total - 1
+			//找到足够数量之前的见证人组，则退出循环
+			if total <= 0 {
+				break
+			}
+		}
+
+		//找到足够数量之前的见证人组，则退出循环
+		if total <= 0 {
+			break
+		}
+
+		currentWitnessGroup = currentWitnessGroup.PreGroup
+	}
+	if currentWitnessGroup == nil {
+		return
+	}
+
+	//开始释放引用，回收内存
+	currentWitnessGroup.PreGroup = nil
+	if currentWitnessGroup.BlockGroup != nil {
+		currentWitnessGroup.BlockGroup.PreGroup = nil
+	}
+
+	firstWitness := currentWitnessGroup.Witness[0]
+	if firstWitness.Block != nil {
+		if firstWitness.Block.witness != nil {
+			firstWitness.Block.witness.PreWitness = nil
+		}
+		if firstWitness.Block.Group != nil {
+			firstWitness.Block.Group.PreGroup = nil
+		}
+		firstWitness.Block.PreBlock = nil
+	}
+	firstWitness.PreWitness = nil
+	if firstWitness.Group != nil {
+		firstWitness.Group.PreGroup = nil
+	}
+
 }

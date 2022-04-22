@@ -1,0 +1,23 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+import "txbase.proto";
+
+message TxVoteIn {
+	TxBase         TxBase    = 1;
+	bytes          Vote      = 2; //见证人地址
+    uint32         VoteType  = 3; //投票类型 1=给见证人投票；2=给社区节点投票；3=轻节点押金；
+    bytes          VoteAddr  = 4; //本字段不用上链。投票地址，根据域名解析的地址。
+}
+
+message TxVoteOut {
+	TxBase TxBase = 1;
+}

@@ -1,15 +1,12 @@
 package sharebox
 
 import (
-	"bytes"
-	"encoding/json"
-
-	// "fmt"
-
-	//	"time"
-	//	"mandela/core/engine"
 	"mandela/core/utils"
+	"bytes"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
 	Task_class_share_self_fileinfo      = "Task_class_share_self_fileinfo"      //定时发送自己上传的文件索引信息

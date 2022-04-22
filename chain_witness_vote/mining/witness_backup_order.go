@@ -4,7 +4,6 @@ import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
 	"mandela/core/utils/crypto"
-	"encoding/hex"
 	"math/big"
 	"sort"
 )
@@ -15,7 +14,7 @@ func OrderWitness(ws []*Witness, random *[]byte) []*Witness {
 	for i, one := range ws {
 		addrBs := []byte(*one.Addr)
 		addrs = append(addrs, &addrBs)
-		witnesses[one.Addr.B58String()] = ws[i]
+		witnesses[utils.Bytes2string(*one.Addr)] = ws[i]
 	}
 
 	idasc := NewAddrASC(random, addrs)
@@ -28,7 +27,7 @@ func OrderWitness(ws []*Witness, random *[]byte) []*Witness {
 	for i, _ := range idsOrder {
 		addrOne := idsOrder[i]
 		addr := crypto.AddressCoin(*addrOne)
-		witness := witnesses[addr.B58String()]
+		witness := witnesses[utils.Bytes2string(addr)]
 		newWitness = append(newWitness, witness)
 	}
 	// return start
@@ -38,13 +37,13 @@ func OrderWitness(ws []*Witness, random *[]byte) []*Witness {
 /*
 	将节点地址随机排序
 */
-func OrderNodeAddr(addrs []*nodeStore.AddressNet) []*nodeStore.AddressNet {
-	witnesses := make(map[string]*nodeStore.AddressNet)
+func OrderNodeAddr(addrs []nodeStore.AddressNet) []nodeStore.AddressNet {
+	witnesses := make(map[string]nodeStore.AddressNet)
 	newaddrBs := make([]*[]byte, 0)
 	for i, one := range addrs {
-		addrBs := []byte(*addrs[i])
+		addrBs := []byte(addrs[i])
 		newaddrBs = append(newaddrBs, &addrBs)
-		witnesses[one.B58String()] = addrs[i]
+		witnesses[utils.Bytes2string(one)] = addrs[i]
 	}
 
 	random := utils.GetHashForDomain(utils.GetRandomDomain())
@@ -52,11 +51,11 @@ func OrderNodeAddr(addrs []*nodeStore.AddressNet) []*nodeStore.AddressNet {
 	idasc := NewAddrASC(&random, newaddrBs)
 	idsOrder := idasc.Sort()
 
-	newaddrs := make([]*nodeStore.AddressNet, 0)
+	newaddrs := make([]nodeStore.AddressNet, 0)
 	for i, _ := range idsOrder {
 		addrOne := idsOrder[i]
 		addr := nodeStore.AddressNet(*addrOne)
-		witness := witnesses[addr.B58String()]
+		witness := witnesses[utils.Bytes2string(addr)]
 		newaddrs = append(newaddrs, witness)
 	}
 	return newaddrs
@@ -91,10 +90,12 @@ func (this AddrASC) Swap(i, j int) {
 }
 
 func (this AddrASC) Sort() []*[]byte {
-	sort.Sort(this)
+	// sort.Sort(this)
+	sort.Stable(this)
 	result := make([]*[]byte, 0)
 	for _, one := range this.nodes {
-		mhash := this.addrMap[hex.EncodeToString(one.Bytes())]
+		// mhash := this.addrMap[hex.EncodeToString(one.Bytes())]
+		mhash := this.addrMap[utils.Bytes2string(one.Bytes())]
 		result = append(result, mhash)
 	}
 	return result
@@ -109,7 +110,8 @@ func NewAddrASC(random *[]byte, addrs []*[]byte) *AddrASC {
 	addrArray := make([]*big.Int, 0)
 	for i, one := range addrs {
 		oneBig := new(big.Int).SetBytes(*one)
-		addrMap[hex.EncodeToString(oneBig.Bytes())] = addrs[i]
+		// addrMap[hex.EncodeToString(oneBig.Bytes())] = addrs[i]
+		addrMap[utils.Bytes2string(oneBig.Bytes())] = addrs[i]
 		addrArray = append(addrArray, oneBig)
 	}
 	findNode := new(big.Int).SetBytes(*random)

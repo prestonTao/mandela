@@ -5,11 +5,15 @@ import (
 	"mandela/core/engine"
 	"mandela/core/utils"
 	"bytes"
-	"encoding/json"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 const (
 	Path_configDir     = "conf"            //配置文件存放目录
@@ -39,19 +43,28 @@ const (
 
 	HashCode    = utils.SHA3_256 //
 	NodeIDLevel = 256            //节点id比特位数
+
+	Model_complete = "complete"
+	Model_light    = "light"
 )
 
 var (
-	WebAddr                = "" //
-	WebPort         uint16 = 0  //本地监听端口
-	Web_path_static        = "" //网页静态文件路径
-	Web_path_views         = "" //网页模板文件路径
-	AddrPre                = "" //收款地址前缀
-	//	NetIds                 = []byte{0} //网络号
-	NetType_release = "release" //正式网络
-	NetType         = "test"    //网络类型:正式网络release/测试网络test
-	RPCUser         = ""        //
-	RPCPassword     = ""        //
+	WebAddr                = ""             //
+	WebPort         uint16 = 0              //本地监听端口
+	Web_path_static        = ""             //网页静态文件路径
+	Web_path_views         = ""             //网页模板文件路径
+	AddrPre                = ""             //收款地址前缀
+	NetIds                 = []byte{0}      //网络号
+	NetType_release        = "release"      //正式网络
+	NetType                = "test"         //网络类型:正式网络release/测试网络test
+	RPCUser                = ""             //
+	RPCPassword            = ""             //
+	Model                  = Model_complete //默认是完整版模式
+
+	Wallet_txitem_save_db = false //是否把未花费的余额保存在数据库，来降低内存
+	Entry                 = []string{}
+	CPUNUM                = runtime.NumCPU()
+	OS                    = runtime.GOOS //操作系统
 )
 
 var (
@@ -62,9 +75,16 @@ var (
 	Store_fileinfo_cache string = filepath.Join(Store_path_dir, Store_path_fileinfo_cache) //缓存中保存的文件索引存储目录路径
 	Store_temp           string = filepath.Join(Store_path_dir, Store_path_temp)           //临时文件夹，本地上传存放目录，存放未切片的完整文件
 	Store_files          string = filepath.Join(Store_path_dir, Store_path_files)          //存放带扩展名的完整文件
+
 )
 
 func init() {
+
+	if OS == "windows" {
+		Wallet_print_serialize_hex = false
+	} else {
+		Wallet_print_serialize_hex = false
+	}
 
 	// fmt.Println("1111111111111")
 	ok, err := utils.PathExists(filepath.Join(Path_configDir, Path_config))
@@ -129,7 +149,10 @@ func init() {
 	AddrPre = cfi.AddrPre
 	RPCUser = cfi.RpcUser
 	RPCPassword = cfi.RpcPassword
-
+	Wallet_txitem_save_db = cfi.BalanceDB
+	if cfi.Model == Model_light {
+		Model = Model_light
+	}
 }
 
 type Config struct {
@@ -146,4 +169,6 @@ type Config struct {
 	Miner       bool   `json:"miner"`       //本节点是否是矿工
 	NetType     string `json:"NetType"`     //正式网络release/测试网络test
 	AddrPre     string `json:"AddrPre"`     //收款地址前缀
+	BalanceDB   bool   `json:"balancedb"`   //是否开启余额保存在数据库的模式
+	Model       string `json:"model"`       //是否开启轻节点S模式
 }

@@ -1,0 +1,190 @@
+参数说明：
+
+
+一，启动参数
+
+注: init参数需要的话，必须是第一个参数。如：peer init -conf=config.json
+参数使用例子：
+peer -conf=conf/config.json -port=9811 -netid=20 -ip=xxx.xxx.xxx.xxx -webaddr=2080 -rpcserver=true -rpcuser=user -rpcpassword=123456 -walletpwd=123456789
+
+init 启动创建创始区块(默认：genesis.json)
+conf 指定配置文件路径(默认：conf/config.json)
+port 本地监听端口 (默认：9811)
+netid 网络id(默认：20)
+ip 本地IP地址(默认：0.0.0.0)
+webaddr rpc端口(默认：2080)
+rpcserver 打开或关闭JSON-RPC true/false(默认：false)
+rpcuser JSON-RPC 连接使用的用户名
+rpcpassword JSON-RPC 连接使用的密码
+walletpwd 钱包密码
+
+
+
+
+二，PRC用例
+
+用法：
+curl --request POST --url http://192.168.0.2:2081/rpc --header 'password: testp'  --header 'user: test' --data '{"method":"getinfo"}'
+注：在header里带上rpc帐号、密码
+
+统一返回格式：{"jsonrpc": "2.0","code": 2000,"result": {...}}
+	
+
+getinfo	                获取区块高度、余额等相关信息 例：{"method":"getinfo"}
+						返回:
+						{
+						    "jsonrpc": "2.0",
+						    "code": 2000,
+						    "result": {
+						        "netid": "WkhD",
+						        "TotalAmount": 300000000000000000, 发行总量
+						        "balance": 999999900000000,      可用余额
+						        "BalanceFrozen": 0,              冻结余额
+						        "BalanceLockup": 0,              锁定余额
+						        "testnet": true,                 是否是测试网络
+						        "blocks": 370758,
+						        "group": 0,
+						        "StartingBlock": 370703,         起始高度
+						        "HighestBlock": 370759,          最新高度
+						        "CurrentBlock": 370758,
+						        "PulledStates": 370759,          同步高度
+						        "BlockTime": 10,
+						        "LightNode": 1000000000,         轻节点最少押金
+						        "CommunityNode": 100000000000,   社区节点最少押金
+						        "WitnessNode": 1000000000000,    见证人节点最少押金
+						        "NameDepositMin": 100000000,     域名注册最少押金
+						        "AddrPre": "ZHC",                地址前缀，单位
+						        "TokenBalance": [
+						            {
+						                "TokenId": "CgAAAAAAAAAmxc6MbyDrbgEEydoIIGjAMhlUOanpwo9woQxTJ97vLw==", Token合约地址
+						                "Name": "通贝宝",                                                       Token名称全称
+						                "Symbol": "TBB",                                                     Token单位
+						                "Supply": 1500000000000000,                                         Token发行总量
+						                "Balance": 1500000000000000,                                        可用余额  
+						                "BalanceFrozen": 0,                                                 冻结余额
+						                "BalanceLockup": 0                                                  锁定余额
+						            },
+						            {
+						                "TokenId": "CgAAAAAAAAAjO0dZlSuAZ55ogOwYqhFCmNUtXcMgFLvEGDo9ugAwxQ==",
+						                "Name": "bitebi",
+						                "Symbol": "BTC",
+						                "Supply": 2100000000000000,
+						                "Balance": 2100000000000000,
+						                "BalanceFrozen": 0,
+						                "BalanceLockup": 0
+						            }
+						        ]
+						    }
+						}
+getnewaddress	创建新地址 {"method":"getnewaddress","params":{"password":"123456"}}
+						password:支付密码;
+						返回:
+						
+listaccounts	帐号列表 {"method":"listaccounts"}
+						"result": [
+					        {
+					            "Index": 0,                                            索引
+					            "AddrCoin": "ZHCDq7xc8QiZ7VAuGy2XibbZxagKqQvPf3iX4",   地址
+					            "Value": 0,                                            可用余额
+					            "ValueFrozen": 0,                                      冻结余额
+					            "ValueLockup": 0,                                      锁仓余额
+					            "Type": 4                                              地址类型 1=见证人;2=社区节点;3=轻节点;4=什么也不是;
+					        },
+					        {
+					            "Index": 1,
+					            "AddrCoin": "ZHCHrH6NEDe57WzWVWZbd2XNJdbAb5XdAoAj4",
+					            "Value": 999999400000000,
+					            "ValueFrozen": 0,
+					            "ValueLockup": 0,
+					            "Type": 4
+					        }
+					    ]
+getaccount	获取某一帐号余额 {"method":"getaccount","params":{"address":"1AX9mfCRZkdEg5Ci3G5SLcyGgecj6GTzLo"}}
+							address:查询目标地址;
+validateaddress	验证地址合法性 {"method":"validateaddress","params":{"address":"12EUY1EVnLJe4Ejb1VaL9NbuDQbBEV"}}
+import                      导入钱包私钥 {"method":"import","params":{"password":"123456789","seed":"xxxxxxxxxxxxxx"}}
+export                      导出钱包 {"method":"export","params":{"password":"123456789"}}
+sendtoaddress          转账 {"method":"sendtoaddress","params":{"srcaddress":"","address":"ZHCMqZE3UFSgf9t1r69QT6hYnG2dApnpmv1q4","changeaddress":"ZHCMqZE3UFSgf9t1r69QT6hYnG2dApnpmv1q4","amount":1000000000000000,"gas":1,"frozen_height":7,"pwd":"123456789","comment":"test"}}
+							srcaddress:转出地址;address:转入地址;changeaddress:指定找零地址;amount:转账金额;gas:手续费;pwd:支付密码;comment:备注;
+sendtoaddressmore  给多个地址转账{"method":"sendtoaddressmore","params":{"addresses":[{"address":"ZHC6iA3DTyy4iz4nkZrbdUKbgJtyvfNDebW84","amount":10000000000000},{"address":"ZHCL8b8YUCGYVCKeBTipT9iZ9n5NhSrU5DiW4","amount":10000000000000}],"gas":10000000,"pwd":"123456789","comment":"test"}}
+updatepwd	修改支付密码 {"method":"updatepwd","params":{"oldpwd":"123456","newpwd":"222222"}}
+namesin	                域名注册，续费，修改 {"method":"namesin","params":{"address":"","amount":500000000,"gas":0,"pwd":"123456789","name":"testweb","netids":["3Dsjd9qaor3bS8NTwsDGbTdGPA3tXiXGKdGJHWDhe6M8"],"addrcoins":["16BXbn97j97jUJrCoicwYuvm1v8gGoG467"]}}
+										address:拥有者;amount:押金金额;gas:手续费;pwd:支付密码;name:域名名称;netids:网络地址;addrcoins:收款地址;
+namesout	                域名注销，退还押金 {"method":"namesout","params":{"address":"押金地址","amount":1000000,"gas":1000,"pwd":"123456","name":"域名：abc"}}
+											address:;amount:;gas:;pwd:;name:;
+getnames	                获取自己注册的域名列表 {"method":"getnames"}
+								    "result": [
+								        {
+								            "Name": "testweb",
+								            "NetIds": [
+								                "3Dsjd9qaor3bS8NTwsDGbTdGPA3tXiXGKdGJHWDhe6M8"
+								            ],
+								            "AddrCoins": [
+								                "16BXbn97j97jUJrCoicwYuvm1v8gGoG467"
+								            ],
+								            "Height": 378725,                     注册时间
+								            "NameOfValidity": 3153600,            有效期
+								            "Deposit": 500000000                  押金
+								        }
+								    ]
+findname	                查询域名 {"method":"findname","params":{"name":"域名"}}
+gettransactionhistory	获得转账交易历史记录 {"method":"gettransactionhistory","params":{"id":"0","total":10}}
+getwitnessinfo	查询见证人状态 {"method":"getwitnessinfo"}
+getcandidatelist	获得候选见证人列表 {"method":"getcandidatelist"}
+getcommunitylist	获取社区节点列表 {"method":"getcommunitylist"}
+getvotelist	                获得自己投过票的列表 {"method":"getvotelist"}
+findblock	                通过区块高度查询一个区块信息 {"method":"findblock","params":{"height":2}}
+tokenpublish            发布一个token{"method":"tokenpublish","params":{"gas":0,"pwd":"123456789","name":"test","symbol":"TEST","supply":19000000000,"owner":"","comment":"123"}}
+tokenpay                 使用token支付{"method":"tokenpay","params":{"address":"SELF9kEwJFPX8WjCDgMgiXKiXBddkChtN89Md5","amount":2,"gas":0,"pwd":"123456789","txid":"0800000000000000045a02d7110508ab9295b5b865ceabeae16bff9ae3cc15bf6abb8816741400c1","comment":"123"}}
+tokenpaymore         使用token支付给多个地址{"method":"tokenpaymore","params":{"addresses":[{"srcaddress":"","address":"ZHCMqZE3UFSgf9t1r69QT6hYnG2dApnpmv1q4","amount":11},{"address":"ZHC6iA3DTyy4iz4nkZrbdUKbgJtyvfNDebW84","amount":11}],"gas":0,"pwd":"123456789","txid":"0a00000000000000819785a0dbbbed8bcfd8ecb0a301abb3531ce32a2e47443bcae448ecca271bbe","comment":"123"}}
+
+{"method":"depositin","params":{"amount":1000000000000,"gas":0,"pwd":"123456789","payload":""}}//见证人押金
+{"method":"depositout","params":{"witness":"ZHCDq7xc8QiZ7VAuGy2XibbZxagKqQvPf3iX4","amount":1000000000000,"gas":0,"pwd":"123456789"}}//见证人取消押金
+{"method":"getcandidatelist"}//获取候选见证人列表
+{"method":"getvotelist","params":{"votetype":1}}//获取自己投票的列表
+{"method":"getcommunitylist"} 获取社区节点列表
+{"method":"getcommunityreward","params":{"address":"1AmmKe1Jizjj2r8f1fafRSEk4nWJJekPfU"}}获取社区节点奖励信息
+{"method":"findblock","params":{"height":2}}根据区块高度查询区块信息
+{"method":"getwitnessinfo"}获取候选见证人状态
+{"method":"votein","params":{"votetype":1,"address":"", "witness":"1H3dYBJxsqdzb3HgpSfHbNuDhtY9TtXckR","amount":100000000000,"gas":1,"pwd":"123456789","payload":""}}
+投票。voteType    int    投票类型，1=给见证人投票；2=给社区节点投票；3=轻节点押金；
+{"method":"voteout","params":{"address":"ZHCHrH6NEDe57WzWVWZbd2XNJdbAb5XdAoAj4","txid":"07000000000000004d25a3bbac1a3cec6b319fe23db2ac9dfde24fb7d5ff290480c8e92dcefa5b7a","amount":100000000000,"gas":0,"pwd":"123456789"}}
+取消投票
+
+{"method":"tokenpublish","params":{"gas":0,"pwd":"123456789","name":"tongbeibao","symbol":"TBB","supply":15000000000000000000,"owner":"","comment":"123"}}发布token
+{"method":"tokenpay","params":{"address":"ZHC2DM2SD45P9vq7rXgdEUGLvso3439f5kVX4","amount":1,"gas":0,"frozen_height":1,"pwd":"123456789","txid":"0a000000000000002b4788f444e36233b0f5166a7241e5202af5c2b64c8b99fe897222066a1d3208","comment":"123"}}token转账
+
+{"method":"findvalue","params":{"key":"0b0000000000000022581073323980666b97be2b45574847c6d3a01b78262420d185f4a884e305d8"}}
+查询交易的详细信息
+
+{"method":"findblock","params":{"height":2}}
+根据区块高度查询区块信息
+
+{"method":"findtx","params":{"txid":"0b0000000000000073b00655d03a6ef44be65eba68158a8194d795a86ef30a2410a7934d7266fe05"}}
+查询一个交易是否上链，以及交易详细信息。upchaincode:1=未确认；2=成功；3=失败；
+
+{"method":"mergetx","params":{"switch":true,"gas":10000000,"pwd":"123456789","unifieaddr":"MMSPc2cBYgiQn36KDzGPWhULU7XwT1Se87U64","totalmax":50}}
+UTXO归集 unifieaddr:归集地址  totalmax:自定义触发归集数量阈值
+
+
+RPC接口错误编码
+	Success                = 2000 //成功
+	NoMethod               = 4001 //没有这个方法
+	TypeWrong              = 5001 //参数类型错误
+	NoField                = 5002 //缺少参数
+	Nomarl                 = 5003 //一般错误，请看错误提示信息
+	Timeout                = 5004 //超时
+	Exist                  = 5005 //已经存在
+	FailPwd                = 5006 //密码错误
+	NotExist               = 5007 //不存在
+	NotEnough              = 5008 //余额不足
+	ContentIncorrectFormat = 5009 //参数格式不正确
+	AmountIsZero           = 5010 //转账不能为0
+	RuleField              = 5011 //地址角色不正确
+	BalanceNotEnough       = 5012 //余额不足
+	VoteExist              = 5013 //投票已经存在
+	VoteNotOpen            = 5014 //投票功能还未开放
+	RewardCountSync        = 5015 //轻节点奖励异步执行中
+	CommentOverLengthMax   = 5016 //备注信息字符串超过最大长度
+	GasTooLittle           = 5017 //交易手续费太少
+

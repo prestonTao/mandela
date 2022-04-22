@@ -1,0 +1,28 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+message Vnodeinfo {
+	bytes    Nid      = 1 ;   //节点真实网络地址
+	uint64   Index    = 2 ;   //节点第几个空间，从1开始,下标为0的节点为实际节点。
+	bytes    Vid      = 3 ;   //vid，虚拟节点网络地址
+}
+
+
+message FindVnodeVO {
+	Vnodeinfo    Self      = 1 ;   //自己节点
+	Vnodeinfo    Target    = 2 ;   //目标节点
+}
+
+
+message VnodeinfoRepeated {
+	repeated    Vnodeinfo    vnodes      = 1 ;   //
+}
+

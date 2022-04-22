@@ -1,21 +1,31 @@
 package engine
 
 import (
-	"encoding/json"
+	crand "crypto/rand"
+	"errors"
+	"math/big"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 //本机向其他服务器的连接
 type Client struct {
 	sessionBase
-	serverName string
-	ip         string
-	port       uint32
-	conn       net.Conn
-	inPack     chan *Packet //接收队列
+	serverName       string
+	ip               string
+	port             uint32
+	conn             net.Conn
+	inPack           chan *Packet //接收队列
+	outChan          chan *[]byte //发送队列
+	outChanCloseLock *sync.Mutex  //是否关闭发送队列
+	outChanIsClose   bool         //是否关闭发送队列。1=关闭
 	// packet     Packet       //
 	//	isClose    bool         //该连接是否被关闭
 	isPowerful bool //是否是强连接，强连接有短线重连功能
@@ -27,6 +37,9 @@ func (this *Client) Connect(ip string, port uint32) (remoteName string, err erro
 
 	this.ip = ip
 	this.port = port
+	this.outChan = make(chan *[]byte, 10000)
+	this.outChanCloseLock = new(sync.Mutex)
+	this.outChanIsClose = false
 
 	this.conn, err = net.Dial("tcp", ip+":"+strconv.Itoa(int(port)))
 	if err != nil {
@@ -36,12 +49,13 @@ func (this *Client) Connect(ip string, port uint32) (remoteName string, err erro
 	//权限验证
 	remoteName, err = defaultAuth.SendKey(this.conn, this, this.serverName)
 	if err != nil {
-		this.conn.Close()
+		// this.conn.Close()
+		this.Close()
 		return
 	}
 
 	// fmt.Println("Connecting to", ip, ":", strconv.Itoa(int(port)))
-	Log.Debug("Connecting to %s:%s", ip, strconv.Itoa(int(port)))
+	Log.Debug("Connecting to:%s:%s local:%s", ip, strconv.Itoa(int(port)), this.conn.LocalAddr().String())
 
 	this.controller = &ControllerImpl{
 		lock:       new(sync.RWMutex),
@@ -49,6 +63,7 @@ func (this *Client) Connect(ip string, port uint32) (remoteName string, err erro
 		attributes: make(map[string]interface{}),
 	}
 	// this.packet.Session = this
+	go this.loopSend()
 	go this.recv()
 	// go this.hold()
 	return
@@ -65,6 +80,7 @@ func (this *Client) reConnect() {
 
 		Log.Debug("Connecting to %s:%s", this.ip, strconv.Itoa(int(this.port)))
 
+		go this.loopSend()
 		go this.recv()
 		// go this.hold()
 		return
@@ -81,11 +97,13 @@ func (this *Client) recv() {
 		packet, err = RecvPackage(this.conn)
 		if err != nil {
 			//			Log.Debug("engine client 222222222222")
+			// Log.Warn("网络错误 Client %s", err.Error())
+			Log.Warn("network error Client:%s", err.Error())
 			break
 		} else {
 			packet.Session = this
-			// Log.Debug("conn recv: %d %s %d\n%s", this.packet.MsgID, this.conn.RemoteAddr(), len(this.packet.Data)+16, hex.EncodeToString(this.packet.Data))
-			//			Log.Debug("conn recv: %d %s %d", packet.MsgID, this.conn.RemoteAddr(), len(packet.Data)+16)
+			// Log.Debug("conn recv: %d %s %d\n%s", packet.MsgID, this.conn.RemoteAddr(), len(packet.Data)+len(packet.Dataplus)+16, hex.EncodeToString(append(packet.Data, packet.Dataplus...)))
+			// Log.Debug("client conn recv: %d %s %d", packet.MsgID, this.conn.RemoteAddr(), len(packet.Data)+len(packet.Dataplus)+16)
 			// if packet.IsWait {
 			// 	Log.Debug("开始等待")
 			// 	packet.IsWait = false
@@ -97,7 +115,7 @@ func (this *Client) recv() {
 			//				Log.Debug("engine client 4444444444444")
 			handler = this.engine.router.GetHandler(packet.MsgID)
 			if handler == nil {
-				Log.Warn("client该消息未注册，消息编号：%d", packet.MsgID)
+				Log.Warn("client The message is not registered, message number:%d", packet.MsgID)
 				//					if this.packet.MsgID == 16 {
 				//						fmt.Println(string(this.packet.Data))
 				//					}
@@ -116,11 +134,48 @@ func (this *Client) recv() {
 		}
 	}
 
+	// close(this.outChan)
+	this.outChanCloseLock.Lock()
+	this.outChanIsClose = true
+	close(this.outChan)
+	this.outChanCloseLock.Unlock()
 	this.Close()
 	if this.isPowerful {
 		go this.reConnect()
 	}
+}
 
+func (this *Client) loopSend() {
+	var n int
+	var err error
+	var buff *[]byte
+	var isClose = false
+	var count = 5
+	var total = 0
+	for {
+		buff, isClose = <-this.outChan
+		if !isClose {
+			Log.Warn("out chan is close")
+			break
+		}
+		this.conn.SetWriteDeadline(time.Now().Add(time.Second * 10))
+		n, err = this.conn.Write(*buff)
+		if err != nil {
+			total++
+			Log.Warn("conn send err: %s", err.Error())
+			if total > count {
+				this.conn.Close()
+			}
+		} else {
+			total = 0
+			// Log.Debug("conn send: %d %s %d %d\n%s", msgID, this.conn.RemoteAddr(), len(*buff), n, hex.EncodeToString(*buff))
+			// Log.Debug("client conn send: %d %s %d", msgID, this.conn.RemoteAddr(), len(*buff))
+			// Log.Info("clent send %s", hex.EncodeToString(*buff))
+		}
+		if n < len(*buff) {
+			// Log.Warn("conn send warn: %d %s length %d %d", msgID, this.conn.RemoteAddr().String(), len(*buff), n)
+		}
+	}
 }
 
 // func (this *Client) Waite(du time.Duration) *Packet {
@@ -135,6 +190,10 @@ func (this *Client) recv() {
 // }
 
 func (this *Client) handlerProcess(handler MsgHandler, msg *Packet) {
+	goroutineId := GetRandomDomain() + TimeFormatToNanosecondStr()
+	_, file, line, _ := runtime.Caller(0)
+	AddRuntime(file, line, goroutineId)
+	defer DelRuntime(file, line, goroutineId)
 	//消息处理模块报错将不会引起宕机
 	defer PrintPanicStack()
 	//消息处理前先通过拦截器
@@ -158,20 +217,44 @@ func (this *Client) handlerProcess(handler MsgHandler, msg *Packet) {
 
 //发送序列化后的数据
 func (this *Client) Send(msgID uint64, data, dataplus *[]byte, waite bool) (err error) {
-	defer PrintPanicStack()
-	// this.packet.IsWait = waite
-	buff := MarshalPacket(msgID, data, dataplus)
-
-	//	var n int
-	_, err = this.conn.Write(*buff)
-	if err != nil {
-		Log.Warn("conn send err: %s", err.Error())
-	} else {
-		// Log.Debug("conn send: %d %s %d %d\n%s", msgID, this.conn.RemoteAddr(), len(*buff), n, hex.EncodeToString(*buff))
-		//		Log.Debug("conn send: %d %s %d %d", msgID, this.conn.RemoteAddr(), len(*buff), n)
+	this.outChanCloseLock.Lock()
+	if this.outChanIsClose {
+		this.outChanCloseLock.Unlock()
+		return errors.New("send channel is close")
 	}
+	buff := MarshalPacket(msgID, data, dataplus)
+	select {
+	case this.outChan <- buff:
+	default:
+		addr := AddressNet([]byte(this.GetName()))
+		Log.Warn("conn send err chan is full :%s", addr.B58String())
+		this.conn.Close()
+	}
+	this.outChanCloseLock.Unlock()
 	return
 }
+
+// func (this *Client) Send(msgID uint64, data, dataplus *[]byte, waite bool) (err error) {
+// 	defer PrintPanicStack()
+// 	// this.packet.IsWait = waite
+// 	buff := MarshalPacket(msgID, data, dataplus)
+
+// 	//设置写入超时时间为1秒钟内
+// 	// this.conn.SetWriteDeadline(time.Now().Add(time.Second))
+// 	var n int
+// 	n, err = this.conn.Write(*buff)
+// 	if err != nil {
+// 		Log.Warn("conn send err: %s", err.Error())
+// 	} else {
+// 		// Log.Debug("conn send: %d %s %d %d\n%s", msgID, this.conn.RemoteAddr(), len(*buff), n, hex.EncodeToString(*buff))
+// 		// Log.Debug("client conn send: %d %s %d", msgID, this.conn.RemoteAddr(), len(*buff))
+// 		// Log.Info("clent send %s", hex.EncodeToString(*buff))
+// 	}
+// 	if n < len(*buff) {
+// 		Log.Warn("conn send warn: %d %s length %d %d", msgID, this.conn.RemoteAddr().String(), len(*buff), n)
+// 	}
+// 	return
+// }
 
 //发送序列化后的数据
 func (this *Client) SendJSON(msgID uint64, data interface{}, waite bool) (err error) {
@@ -189,6 +272,7 @@ func (this *Client) SendJSON(msgID uint64, data interface{}, waite bool) (err er
 
 //客户端关闭时,退出recv,send
 func (this *Client) Close() {
+	Log.Info("Close session ClientConn")
 	if this.engine.closecallback != nil {
 		this.engine.closecallback(this.GetName())
 	}
@@ -215,4 +299,34 @@ func NewClient(name, ip string, port uint32) *Client {
 	// client.outData = make(chan *[]byte, 1000)
 	client.Connect(ip, port)
 	return client
+}
+
+/*
+	随机获取一个域名
+*/
+func GetRandomDomain() string {
+	str := "abcdefghijklmnopqrstuvwxyz"
+	// rand.Seed(int64(time.Now().Nanosecond()))
+	result := ""
+	r := int64(0)
+	for i := 0; i < 8; i++ {
+		r = GetRandNum(int64(25))
+		result = result + str[r:r+1]
+	}
+	return result
+}
+
+/*
+	获得一个随机数(0 - n]，包含0，不包含n
+*/
+func GetRandNum(n int64) int64 {
+	if n <= 0 {
+		return 0
+	}
+	result, _ := crand.Int(crand.Reader, big.NewInt(int64(n)))
+	return result.Int64()
+}
+
+func TimeFormatToNanosecondStr() string {
+	return time.Now().Format("20060102150405999999999")
 }

@@ -25,18 +25,31 @@ func BuildIds() {
 
 	ids := []string{
 
-		"HCzFqZSNAZysyBazDQRtpFzy6eq7JigKVbQSqp3Zw1m",
+		"Bsyuy8Cpg5VWi69axQKaU6pLbHkWHffCDjcQEFJC1qEr",
 
-		"BL9ZL1qX8vGRNUaZEq1E4svhjX1fiFm8iYJrMLHV7NTG",
-		"8VmyBM5XmJRzPmQu7TC82TxdkX5BNc87sMaSfyft9fXW",
-		"9eQ642R1zttsGw4ikdn5vEtG2f18GGiV2NBXL9gsszmM",
-		"CsZqHcCVTukktiBDv9Cc1ELrhN7KVKwGnwzPNG2a9obV",
-
-		"3yk5sZhd7o7PGT6i5muUXSCHDHxjoDAWuaMbqX1K1NXT",
-		"EuNqmo354mxgizaZUgNkd59M2ho8nPWMs4QEN13W37Xo",
-		"GKr849QTWzmhfMkpT4iatrvQNmREXBZrAkwHNmCDZx5m",
-		"AxwnZMGyNsLSLHRB4nN2AvuFodtLZwYkCdC5L49beyEE",
+		"2w5QBfujmLTAvesJRyRpxZFj4D4PJTEbhDVQJt1kbDmk",
+		"D79GZyCBcNKyvc3pHco6nvnzJuTGiaYDLqFjkLG1fkcR",
+		"84yEekKXynEx3SSaQjEQUr5JDf6B1Fp34Kn2hBNQmNZS",
+		// "4V2haHmFRdS5hp9VELnnVNkKwHmoUD41TSgUys28pskj",
 	}
+	// 本节点为 Bsyuy8Cpg5VWi69axQKaU6pLbHkWHffCDjcQEFJC1qEr
+	// --逻辑节点 D79GZyCBcNKyvc3pHco6nvnzJuTGiaYDLqFjkLG1fkcR
+	// --逻辑节点 2w5QBfujmLTAvesJRyRpxZFj4D4PJTEbhDVQJt1kbDmk
+
+	// ids := []string{
+
+	// 	"HCzFqZSNAZysyBazDQRtpFzy6eq7JigKVbQSqp3Zw1m",
+
+	// 	"BL9ZL1qX8vGRNUaZEq1E4svhjX1fiFm8iYJrMLHV7NTG",
+	// 	"8VmyBM5XmJRzPmQu7TC82TxdkX5BNc87sMaSfyft9fXW",
+	// 	"9eQ642R1zttsGw4ikdn5vEtG2f18GGiV2NBXL9gsszmM",
+	// 	"CsZqHcCVTukktiBDv9Cc1ELrhN7KVKwGnwzPNG2a9obV",
+
+	// 	"3yk5sZhd7o7PGT6i5muUXSCHDHxjoDAWuaMbqX1K1NXT",
+	// 	"EuNqmo354mxgizaZUgNkd59M2ho8nPWMs4QEN13W37Xo",
+	// 	"GKr849QTWzmhfMkpT4iatrvQNmREXBZrAkwHNmCDZx5m",
+	// 	"AxwnZMGyNsLSLHRB4nN2AvuFodtLZwYkCdC5L49beyEE",
+	// }
 
 	for n := 0; n < len(ids); n++ {
 		fmt.Println("本节点为", ids[n])

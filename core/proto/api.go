@@ -15,12 +15,12 @@ func SendMsg(uid *utils.Multihash, content []byte) (msgid *utils.Multihash) {
 	qd.Result = make(chan bool)
 	qd.Message = mess
 	addMap(qd)
-	go func() {
+	utils.Go(func() {
 		err := sendMessage(mess)
 		if err != nil {
 			addQueue(msgid.B58String())
 		}
-	}()
+	})
 	return
 }
 

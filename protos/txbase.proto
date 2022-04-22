@@ -1,0 +1,36 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+message TxBase {
+	bytes    Hash        =1;  //本交易hash，不参与区块hash，只用来保存
+	uint64   Type        =2;  //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
+	uint64   Vin_total   =3;  //输入交易数量
+	repeated Vin   Vin   =4;  //交易输入
+	uint64   Vout_total  =5;  //输出交易数量
+	repeated Vout  Vout  =6;  //交易输出
+	uint64   Gas         =7;  //交易手续费，此字段不参与交易hash
+	uint64   LockHeight  =8;  //本交易锁定在小于等于这个高度的块中，超过这个高度，块将不被打包到区块中。
+	bytes    Payload     =9;  //备注信息
+	bytes    BlockHash   =10;  //本交易属于的区块hash，不参与区块hash，只用来保存
+}
+
+message Vin {
+    bytes    Txid   =1; //UTXO 前一个交易的id
+    uint64   Vout   =2; //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（从零开始）
+    bytes    Puk    =3; //公钥
+    bytes    Sign   =4; //对上一个交易签名，是对整个交易签名（若只对输出签名，当地址和金额一样时，签名输出相同）。
+}
+
+message Vout {
+    uint64       Value         =1;  //输出金额 = 实际金额 * 100000000
+    bytes        Address       =2;  //钱包地址
+    uint64       FrozenHeight  =3;  //冻结高度。小于等于这个冻结高度，未花费的交易余额不能使用
+}

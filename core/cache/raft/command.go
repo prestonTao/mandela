@@ -44,7 +44,7 @@ func sendVote(id *utils.Multihash, data []byte) error {
 	message := mc.NewMessage(mhead, mbody)
 	if message.Send(MSGID_RaftVote) {
 		//fmt.Println("数据发送成功", id.B58String())
-		bs := mc.WaitRequest(mc.CLASS_raftvote, message.Body.Hash.B58String())
+		bs := mc.WaitRequest(mc.CLASS_raftvote, utils.Bytes2string(message.Body.Hash))
 		//fmt.Println("有消息返回", string(*bs))
 		if bs == nil {
 			// fmt.Println("发送投票数据消息失败，可能超时")

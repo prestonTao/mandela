@@ -6,11 +6,7 @@ package mining
 import (
 	"mandela/chain_witness_vote/db"
 	"mandela/config"
-
-	// "mandela/core/engine"
-	// "encoding/hex"
 	"errors"
-	// "fmt"
 	"sync/atomic"
 )
 
@@ -31,49 +27,14 @@ type Forks struct {
 /*
 	添加一个区块到添加队列中去
 */
-func (this *Forks) AddBlockHead(bhvo *BlockHeadVO) {
-
-	// forks.GetLongChain().AddBlock()
-
-	// // fmt.Println("-----------------查询前置区块为", hex.EncodeToString(bhvo.BH.Previousblockhash[0]))
-	// chain := forks.FindChain(bhvo.BH.Previousblockhash[0])
-	// if chain == nil {
-	// 	//TODO 这里产生区块分叉
-	// 	fmt.Println("产生了分叉")
-
-	// 	chain = forks.GetLongChain()
-	// 	// engine.Log.Info("------添加一个区块不连续", chain.GetHighestBlock(), chain.GetCurrentBlock())
-	// 	// //判断是否是最新的区块
-	// 	// if (chain.GetHighestBlock() <= 0 || chain.GetHighestBlock() <= 0) ||
-	// 	// 	chain.GetHighestBlock() > chain.GetCurrentBlock() {
-	// 	// 	// fmt.Println("------添加一个区块不连续 22222222222222")
-	// 	// 	// //更新网络广播块高度
-	// 	// 	if bhvo.BH.Height > chain.GetHighestBlock() {
-	// 	// 		// fmt.Println("------添加一个区块不连续 33333333333333")
-	// 	// 		chain.SetHighestBlock(bhvo.BH.Height)
-	// 	// 		// atomic.StoreUint64(&forks.HighestBlock, bhvo.BH.Height)
-	// 	// 	}
-	// 	// 	engine.Log.Info("同步区块，从数据库加载到内存")
-	// 	// 	//同步内存，从数据库加载到内存
-	// 	// }
-
-	// 	//更新网络广播块高度
-	// 	// if bhvo.BH.Height > forks.GetLongChain().GetHighestBlock() {
-	// 	// 	// atomic.StoreUint64(&forks.HighestBlock, bhvo.BH.Height)
-	// 	// 	chain.SetHighestBlock(bhvo.BH.Height)
-	// 	// }
-
-	// 	chain.NoticeLoadBlockForDB(false)
-	// 	return
-	// }
+func (this *Forks) AddBlockHead(bhvo *BlockHeadVO) error {
 
 	chain := forks.GetLongChain()
 
-	// fmt.Println("------添加区块")
 	//添加到内存
-	chain.AddBlock(bhvo)
-
-	// forks.SelectLongChain()
+	// start := time.Now()
+	return chain.AddBlock(bhvo)
+	// engine.Log.Info("导入区块耗时 %s", time.Now().Sub(start))
 
 }
 
@@ -114,17 +75,17 @@ func GetFirstBlock() error {
 	if chainInfo == nil {
 		return errors.New("Synchronization start block hash failed")
 	}
-	// fmt.Println("同步到的创世区块hash", hex.EncodeToString(chainInfo.StartBlockHash))
 	// engine.Log.Info("同步到的创世区块hash %s", hex.EncodeToString(chainInfo.StartBlockHash))
-	db.Save(config.Key_block_start, &chainInfo.StartBlockHash)
+	db.LevelDB.Save(config.Key_block_start, &chainInfo.StartBlockHash)
+	config.StartBlockHash = chainInfo.StartBlockHash
 
-	bhvo := syncBlockFlashDB(&chainInfo.StartBlockHash)
+	peerBlockinfo, _ := FindRemoteCurrentHeight()
+	bhvo, _ := syncBlockFlashDB(&chainInfo.StartBlockHash, peerBlockinfo)
 	if bhvo == nil {
 		return nil
 	}
 
-	bhvo.BH.BuildHash()
-	// fmt.Println("打印同步到的区块", hex.EncodeToString(bh.Hash))
+	bhvo.BH.BuildBlockHash()
 	// engine.Log.Info("打印同步到的区块 %s", hex.EncodeToString(bhvo.BH.Hash))
 	BuildFirstChain(bhvo)
 
@@ -150,15 +111,10 @@ func BuildFirstChain(bhvo *BlockHeadVO) {
 func (this *Forks) buildFirstChain(bhvo *BlockHeadVO) {
 
 	newChain := NewChain()
-	newChain.StartingBlock = bhvo.BH.Height
+	newChain.SetStartingBlock(bhvo.BH.Height, uint64(bhvo.BH.Time))
+	// newChain.StartingBlock = bhvo.BH.Height
 
-	// fmt.Println("--------------------保存的区块id为:", hex.EncodeToString(newBlock.Id))
-	// this.chainss.Store(hex.EncodeToString(newBlock.Id), newChain)
 	this.LongChain = newChain
-
-	//构建见证人链
-	// newChain.witnessChain.witness
-	// newChain.CountBlock(bhvo.BH, &bhvo.Txs, newBlock)
 
 	//计算余额
 	newChain.balance.CountBalanceForBlock(bhvo)
@@ -167,29 +123,16 @@ func (this *Forks) buildFirstChain(bhvo *BlockHeadVO) {
 	newChain.witnessBackup.CountWitness(&bhvo.Txs)
 
 	//
-	newChain.witnessChain.BuildWitnessGroup(true)
-
-	// fmt.Println("1111111111111111111111111111111111111111111111111111111")
+	newChain.witnessChain.BuildWitnessGroup(true, true)
 
 	//把见证人设置为已出块
 	newChain.witnessChain.SetWitnessBlock(bhvo)
 
-	newChain.witnessChain.BuildBlockGroup(bhvo)
+	newChain.witnessChain.BuildBlockGroup(bhvo, nil)
 
-	// fmt.Println("222222222222222222222222222222222222222222222")
+	// SaveTxToBlockHead(bhvo)
 
-	// newChain.witnessChain.witnessGroup.BuildGroup()
-	// newChain.witnessChain.witnessGroup = newChain.witnessChain.witnessGroup.NextGroup
-
-	// newChain.witnessChain.BuildWitnessGroup(config.Witness_backup_group)
-
-	//直接将第一个组构建好
-
-	// newChain.witnessChain.BuildMiningTime()
-
-	// newChain.lastBlock = newBlock
 	return
-
 }
 
 /*
@@ -420,6 +363,7 @@ func (this *Forks) GetHighestBlock() uint64 {
 	获取所链接的节点的最高高度
 */
 func (this *Forks) SetHighestBlock(n uint64) {
+	// engine.Log.Warn("设置最新区块高度 %d", n)
 	atomic.StoreUint64(&this.HighestBlock, n)
 	db.SaveHighstBlock(n)
 }
@@ -437,3 +381,18 @@ func GetHighestBlock() uint64 {
 func SetHighestBlock(n uint64) {
 	forks.SetHighestBlock(n)
 }
+
+// var RemoteCurrentBlock uint64 //远程节点已经同步了的高度
+// /*
+// 	获取网络节点广播的区块最高高度
+// */
+// func GetRemoteCurrentBlock() uint64 {
+// 	return atomic.LoadUint64(&RemoteCurrentBlock)
+// }
+
+// /*
+// 	获取所链接的节点的最高高度
+// */
+// func SetRemoteCurrentBlock(n uint64) {
+// 	atomic.StoreUint64(&RemoteCurrentBlock, n)
+// }

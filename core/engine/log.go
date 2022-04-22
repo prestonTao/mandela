@@ -172,7 +172,7 @@ func GlobalInit(kind, path, level string, length int) error {
 	if Log == nil {
 		Log = logs.NewLogger(int64(length))
 	}
-
+	Log.EnableFuncCallDepth(true)
 	err := Log.SetLogger(kind, path)
 	if err != nil {
 		return err

@@ -3,15 +3,17 @@ package addr_manager
 import (
 	gconfig "mandela/config"
 	"mandela/core/config"
+	"mandela/core/engine"
+	"mandela/core/nodeStore"
 	"mandela/core/utils"
-	"encoding/json"
 	"errors"
-	"math/rand"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
+	// "mandela/core/engine"
 )
 
 var (
@@ -22,7 +24,7 @@ var (
 	//超级节点地址最大数量
 	Sys_config_entryCount = 1000
 	//本地保存的超级节点地址列表
-	Sys_superNodeEntry = make(map[string]string, Sys_config_entryCount)
+	Sys_superNodeEntry = new(sync.Map) //make(map[string]string, Sys_config_entryCount)
 	//清理本地保存的超级节点地址间隔时间
 	Sys_cleanAddressTicker = time.Minute * 1
 	//需要关闭定时清理超级节点地址列表程序时，向它发送一个信号
@@ -38,8 +40,12 @@ var (
 	启动本地服务
 */
 func init() {
-	go smartLoadAddr()
+	// go smartLoadAddr()
 	//	startLoadChan <- true
+}
+
+func Init() {
+	go smartLoadAddr()
 }
 
 /*
@@ -70,8 +76,12 @@ func registerFunc(newFunc func()) {
 */
 func smartLoadAddr() {
 	for {
-		<-startLoadChan
-		LoadAddrForAll()
+		// <-startLoadChan
+		if nodeStore.SuperPeerId == nil {
+			// engine.Log.Info("开始加载所有超级节点地址")
+			LoadAddrForAll()
+		}
+		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -79,7 +89,7 @@ func smartLoadAddr() {
 	添加一个地址
 */
 func AddSuperPeerAddr(addr string) {
-	// fmt.Println("添加一个超级节点地址", addr)
+	// engine.Log.Info("添加一个超级节点地址 %s", addr)
 	//检查是否重复
 	// if _, ok := Sys_superNodeEntry[addr]; ok {
 	// 	return
@@ -96,11 +106,14 @@ func AddSuperPeerAddr(addr string) {
 		}
 	}
 
+	// engine.Log.Info("检查节点 222222222222222")
 	//检查这个地址是否可用
 	if !CheckOnline(addr) {
+		engine.Log.Warn("This IP address cannot be connected %s", addr)
 		return
 	}
-	Sys_superNodeEntry[addr] = ""
+	// Sys_superNodeEntry[addr] = ""
+	Sys_superNodeEntry.Store(addr, "")
 	//	BroadcastSubscribe(addr)
 	SubscribesChan <- addr
 }
@@ -114,46 +127,144 @@ func AddSuperPeerAddr(addr string) {
 func GetSuperAddrOne(contain bool) (string, uint16, error) {
 	addr, port := config.GetHost()
 	myaddr := addr + ":" + strconv.Itoa(int(port))
-	rand.Seed(int64(time.Now().Nanosecond()))
-	for len(Sys_superNodeEntry) != 0 {
-		if !contain && len(Sys_superNodeEntry) == 1 {
-			if _, ok := Sys_superNodeEntry[myaddr]; ok {
-				return "", 0, errors.New("超级节点地址只有自己")
-			}
+	// rand.Seed(int64(time.Now().Nanosecond()))
+	// addrTotal := 0
+	// Sys_superNodeEntry.Range(func(k, v interface{}) bool {
+	// 	addrTotal++
+	// 	return true
+	// })
+	// if addrTotal <= 0 {
+	// 	e = errors.New("没有可用的超级节点地址")
+	// 	return
+	// }
+
+	// if !contain && addrTotal == 1 {
+	// 	// if _, ok := Sys_superNodeEntry[myaddr]; ok {
+	// 	if _, ok := Sys_superNodeEntry.Load(myaddr); ok {
+	// 		return "", 0, errors.New("超级节点地址只有自己")
+	// 	}
+	// }
+tag:
+	randStrs := make([]string, 0)
+	Sys_superNodeEntry.Range(func(k, v interface{}) bool {
+		key := k.(string)
+		if contain {
+			randStrs = append(randStrs, key)
+			return true
 		}
-		// 随机取[0-1000)
-		r := rand.Intn(len(Sys_superNodeEntry))
-		count := 0
-		for key, _ := range Sys_superNodeEntry {
-			if count == r {
-				if key == myaddr {
-					if contain {
-						host, portStr, _ := net.SplitHostPort(key)
-						port, err := strconv.Atoi(portStr)
-						if err != nil {
-							return "", 0, errors.New("IP地址解析失败")
-						}
-						return host, uint16(port), nil
-					} else {
-						break
-					}
-				}
-				if CheckOnline(key) {
-					host, portStr, _ := net.SplitHostPort(key)
-					port, err := strconv.Atoi(portStr)
-					if err != nil {
-						return "", 0, errors.New("IP地址解析失败")
-					}
-					return host, uint16(port), nil
-				} else {
-					delete(Sys_superNodeEntry, key)
-					break
-				}
-			}
-			count = count + 1
+		if key == myaddr {
+			return true
 		}
+		randStrs = append(randStrs, key)
+		return true
+	})
+	if len(randStrs) <= 0 {
+		// e = errors.New("没有可用的超级节点地址")
+		return "", 0, errors.New("没有可用的超级节点地址")
 	}
-	return "", 0, errors.New("没有可用的超级节点地址")
+
+	strOne := utils.RandString(randStrs...)
+
+	host, portStr, _ := net.SplitHostPort(strOne)
+
+	p, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", 0, errors.New("IP地址解析失败")
+	}
+	//如果抽中的是自己，则直接返回
+	if strOne == myaddr {
+		return host, uint16(p), nil
+	}
+	if !CheckOnline(strOne) {
+		Sys_superNodeEntry.Delete(strOne)
+		goto tag
+	}
+	return host, uint16(p), nil
+
+	//---------------------
+	//如果不包含自己，则随机数总量不包含自己
+	// if !contain {
+	// 	addrTotal = addrTotal - 1
+	// }
+	// // 随机取[0-1000)
+	// r := rand.Intn(addrTotal)
+	// count := 0
+	// Sys_superNodeEntry.Range(func(k, v interface{}) bool {
+	// 	if count != r {
+	// 		count = count + 1
+	// 		return true
+	// 	}
+	// 	key := k.(string)
+	// 	if key == myaddr {
+	// 		if contain {
+	// 			var err error
+	// 			portStr := ""
+	// 			h, portStr, _ = net.SplitHostPort(key)
+	// 			p, err = strconv.Atoi(portStr)
+	// 			if err != nil {
+	// 				// return "", 0, errors.New("IP地址解析失败")
+	// 				e = errors.New("IP地址解析失败")
+	// 				return false
+	// 			}
+	// 			// return host, uint16(port), nil
+	// 			return false
+	// 		} else {
+	// 			return false
+	// 		}
+	// 	}
+	// 	// engine.Log.Info("检查节点 33333333333333")
+	// 	if CheckOnline(key) {
+	// 		var err error
+	// 		portStr := ""
+	// 		h, portStr, _ = net.SplitHostPort(key)
+	// 		p, err = strconv.Atoi(portStr)
+	// 		if err != nil {
+	// 			// return "", 0, errors.New("IP地址解析失败")
+	// 			e = errors.New("IP地址解析失败")
+	// 			return false
+	// 		}
+	// 		// return host, uint16(port), nil
+	// 		return false
+	// 	} else {
+	// 		delete(Sys_superNodeEntry, key)
+	// 		return false
+	// 	}
+
+	// })
+	// // for key, _ := range Sys_superNodeEntry {
+	// // 	if count == r {
+	// // 		if key == myaddr {
+	// // 			if contain {
+	// // 				host, portStr, _ := net.SplitHostPort(key)
+	// // 				port, err := strconv.Atoi(portStr)
+	// // 				if err != nil {
+	// // 					return "", 0, errors.New("IP地址解析失败")
+	// // 				}
+	// // 				return host, uint16(port), nil
+	// // 			} else {
+	// // 				break
+	// // 			}
+	// // 		}
+	// // 		// engine.Log.Info("检查节点 33333333333333")
+	// // 		if CheckOnline(key) {
+	// // 			host, portStr, _ := net.SplitHostPort(key)
+	// // 			port, err := strconv.Atoi(portStr)
+	// // 			if err != nil {
+	// // 				return "", 0, errors.New("IP地址解析失败")
+	// // 			}
+	// // 			return host, uint16(port), nil
+	// // 		} else {
+	// // 			delete(Sys_superNodeEntry, key)
+	// // 			break
+	// // 		}
+	// // 	}
+	// // 	count = count + 1
+	// // }
+
+	// if e == nil {
+	// 	e = errors.New("没有可用的超级节点地址")
+	// }
+	// return
 }
 
 /*

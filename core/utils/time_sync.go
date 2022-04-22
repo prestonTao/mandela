@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -12,24 +11,21 @@ import (
 )
 
 //内置时间，精确到秒
+var useSystemTime = true //是否使用系统自带的时间
 var now = int64(0)
 var timeOnec = new(sync.Once)
 var syncTimeFun SyncTimeFun
 
 type SyncTimeFun func() (int64, error)
 
-func StartSystemTime() {
-	syncTimeFun = getSystemTime
-	// now = t.Unix() - int64(offset)
-	timeOnec.Do(systemTimeTicker)
+func StartSystemTime() error {
+	useSystemTime = true
+	// syncTimeFun = getSystemTime
+	// timeOnec.Do(systemTimeTicker)
+	return nil
 }
 
 func StartOtherTime() error {
-	// othreTime, err := getSuningTime()
-	// if err != nil {
-	// 	return err
-	// }
-	// now = othreTime
 	syncTimeFun = getSuningTime
 	timeOnec.Do(systemTimeTicker)
 	return nil
@@ -56,6 +52,10 @@ func systemTimeTicker() {
 	获取时间
 */
 func GetNow() int64 {
+	if useSystemTime {
+		now, _ := getSystemTime()
+		return now
+	}
 	return atomic.LoadInt64(&now)
 }
 
@@ -83,8 +83,10 @@ func getSuningTime() (int64, error) {
 		return 0, err
 	}
 
-	_, offset := t.Zone()
-	unix := t.Unix() - int64(offset) //本地时间减去8小时
+	// _, offset := t.Zone()
+	// unix := t.Unix() - int64(offset) //本地时间减去8小时
+
+	unix := t.Unix()
 
 	return unix, nil
 
@@ -94,8 +96,9 @@ func getSuningTime() (int64, error) {
 	获取系统时间
 */
 func getSystemTime() (int64, error) {
-	t := time.Now()
-	_, offset := t.Zone()
-	now = t.Unix() - int64(offset)
-	return now, nil
+	// t := time.Now()
+	// _, offset := t.Zone()
+	// now = t.Unix() - int64(offset)
+	// return now, nil
+	return time.Now().Unix(), nil
 }

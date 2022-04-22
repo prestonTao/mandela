@@ -3,12 +3,15 @@ package addr_manager
 import (
 	"mandela/core/engine"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	检查一个地址的计算机是否在线
@@ -33,17 +36,29 @@ func CheckAddr() {
 		先获得一个拷贝
 	*/
 	oldSuperPeerEntry := make(map[string]string)
-	for key, value := range Sys_superNodeEntry {
+	Sys_superNodeEntry.Range(func(k, v interface{}) bool {
+		key := k.(string)
+		value := v.(string)
 		oldSuperPeerEntry[key] = value
-	}
+		return true
+	})
+	// for key, value := range Sys_superNodeEntry {
+	// 	oldSuperPeerEntry[key] = value
+	// }
 	/*
 		一个地址一个地址的判断是否可用
 	*/
 	for key, _ := range oldSuperPeerEntry {
+		// engine.Log.Info("检查节点 1111111111111")
+		//如果地址是本节点，则退出
+		// if config.Init_LocalIP+":"+strconv.Itoa(int(config.Init_LocalPort)) == key {
+		// 	continue
+		// }
 		if CheckOnline(key) {
 			AddSuperPeerAddr(key)
 		} else {
-			delete(Sys_superNodeEntry, key)
+			// delete(Sys_superNodeEntry, key)
+			Sys_superNodeEntry.Delete(key)
 		}
 	}
 }
@@ -53,7 +68,8 @@ func CheckAddr() {
 */
 func RemoveIP(ip string, port uint16) {
 	key := net.JoinHostPort(ip, strconv.Itoa(int(port)))
-	delete(Sys_superNodeEntry, key)
+	// delete(Sys_superNodeEntry, key)
+	Sys_superNodeEntry.Delete(key)
 }
 
 /*
@@ -72,5 +88,5 @@ func parseSuperPeerEntry(fileBytes []byte) {
 	for key, _ := range tempSuperPeerEntry {
 		AddSuperPeerAddr(key)
 	}
-	AddSuperPeerAddr(Path_SuperPeerdomain)
+	// AddSuperPeerAddr(Path_SuperPeerdomain)
 }

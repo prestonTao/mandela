@@ -13,7 +13,7 @@
 *.out
 go.sum
 
-/example/*
+example/*
 
 
 test/wallet/

@@ -3,6 +3,7 @@ package virtual_node
 import (
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
+	"mandela/protos/go_protos"
 	"bytes"
 )
 
@@ -15,6 +16,15 @@ type Vnodeinfo struct {
 	Index uint64               `json:"index"` //节点第几个空间，从1开始,下标为0的节点为实际节点。
 	Vid   AddressNetExtend     `json:"vid"`   //vid，虚拟节点网络地址
 	// lastContactTimestamp time.Time  //最后检查的时间戳
+}
+
+func (this *Vnodeinfo) Proto() ([]byte, error) {
+	vnodeinfo := go_protos.Vnodeinfo{
+		Nid:   this.Nid,   //节点真实网络地址
+		Index: this.Index, //节点第几个空间，从1开始,下标为0的节点为实际节点。
+		Vid:   this.Vid,   //vid，虚拟节点网络地址
+	}
+	return vnodeinfo.Marshal()
 }
 
 /*

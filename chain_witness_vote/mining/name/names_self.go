@@ -4,7 +4,10 @@ import (
 	"mandela/config"
 	"mandela/core/nodeStore"
 	"mandela/core/utils/crypto"
+	"mandela/protos/go_protos"
 	"sync"
+
+	"github.com/gogo/protobuf/proto"
 )
 
 var NameOfValidity = uint64(0) //域名有效高度。有效期为365天，根据出块速度换算为有效高度。
@@ -63,7 +66,7 @@ func GetNameList() []Nameinfo {
 	name := make([]Nameinfo, 0)
 	names.Range(func(k, v interface{}) bool {
 		nameOne := v.(Nameinfo)
-		nameOne.NameOfValidity = NameOfValidity
+		nameOne.NameOfValidity = nameOne.Height + NameOfValidity
 		name = append(name, nameOne)
 		return true
 	})
@@ -78,6 +81,54 @@ type Nameinfo struct {
 	Height         uint64                 //注册区块高度，通过现有高度计算出有效时间
 	NameOfValidity uint64                 //有效块数量
 	Deposit        uint64                 //冻结金额
+}
+
+func (this *Nameinfo) Proto() ([]byte, error) {
+	netids := make([][]byte, 0)
+	for _, one := range this.NetIds {
+		netids = append(netids, one)
+	}
+	addrCoins := make([][]byte, 0)
+	for _, one := range this.AddrCoins {
+		addrCoins = append(addrCoins, one)
+	}
+	nip := go_protos.Nameinfo{
+		Name:           this.Name,
+		Txid:           this.Txid,
+		NetIds:         netids,
+		AddrCoins:      addrCoins,
+		Height:         this.Height,
+		NameOfValidity: this.NameOfValidity,
+		Deposit:        this.Deposit,
+	}
+	return nip.Marshal()
+}
+
+func ParseNameinfo(bs []byte) (*Nameinfo, error) {
+	nip := new(go_protos.Nameinfo)
+	err := proto.Unmarshal(bs, nip)
+	if err != nil {
+		return nil, err
+	}
+
+	netids := make([]nodeStore.AddressNet, 0)
+	for _, one := range nip.NetIds {
+		netids = append(netids, one)
+	}
+	addrCoins := make([]crypto.AddressCoin, 0)
+	for _, one := range nip.AddrCoins {
+		addrCoins = append(addrCoins, one)
+	}
+	nameinfo := Nameinfo{
+		Name:           nip.Name,
+		Txid:           nip.Txid,
+		NetIds:         netids,
+		AddrCoins:      addrCoins,
+		Height:         nip.Height,
+		NameOfValidity: nip.NameOfValidity,
+		Deposit:        nip.Deposit,
+	}
+	return &nameinfo, nil
 }
 
 /*

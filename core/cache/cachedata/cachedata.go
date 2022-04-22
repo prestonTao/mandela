@@ -1,11 +1,13 @@
 package cachedata
 
 import (
-	"encoding/json"
-	// "fmt"
 	"mandela/core/utils"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
+
+var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 //数据结构
 type CacheData struct {
@@ -45,7 +47,7 @@ func (cd *CacheData) Json() []byte {
 
 //生成需要保存的K/V
 func (cd *CacheData) buildKV() (key string, value []byte) {
-	key = cd.Key.B58String()
+	key = utils.Bytes2string(cd.Key) //cd.Key.B58String()
 	value = cd.Json()
 	return
 }

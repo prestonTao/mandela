@@ -6,15 +6,16 @@ import (
 	"mandela/core/message_center"
 	"mandela/core/message_center/flood"
 	"mandela/core/nodeStore"
+	"mandela/core/utils"
 	sconfig "mandela/sharebox/config"
 	"bytes"
-	"encoding/hex"
-
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	注册这些消息id
@@ -59,7 +60,7 @@ func RegisterMsgid() {
 	收到共享文件消息
 */
 func AddFileShare(c engine.Controller, msg engine.Packet, message *message_center.Message) {
-	fmt.Println("收到共享文件消息")
+	// fmt.Println("收到共享文件消息")
 
 	// message, err := mc.ParserMessage(&msg.Data, &msg.Dataplus, msg.MsgID)
 	// if err != nil {
@@ -82,7 +83,7 @@ func AddFileShare(c engine.Controller, msg engine.Packet, message *message_cente
 		// fmt.Println(err)
 	}
 
-	fmt.Println("本节点保存文件索引", string(fi.JSON()))
+	// fmt.Println("本节点保存文件索引", string(fi.JSON()))
 
 	//判断本地网络是否存在文件，若不存在则添加
 	filocal := FindFileindexToNet(fi.Hash.B58String())
@@ -92,9 +93,9 @@ func AddFileShare(c engine.Controller, msg engine.Packet, message *message_cente
 		if err != nil {
 			// fmt.Println(err)
 		}
-		fmt.Println("文件索引保存到本地")
+		// fmt.Println("文件索引保存到本地")
 	} else {
-		fmt.Println("本地有文件索引")
+		// fmt.Println("本地有文件索引")
 		//文件中添加共享用户
 		fi.AddShareUser(message.Head.Sender)
 		// for _, v := range fi.FileChunk.GetAll() {
@@ -148,7 +149,8 @@ func AddFileShare_recv(c engine.Controller, msg engine.Packet, message *message_
 	//		return
 	//	}
 	//	fmt.Println("是本节点的")
-	flood.ResponseWait(message_center.CLASS_sharefile, hex.EncodeToString(message.Body.Hash), &[]byte{})
+	// flood.ResponseWait(message_center.CLASS_sharefile, hex.EncodeToString(message.Body.Hash), &[]byte{})
+	flood.ResponseWait(message_center.CLASS_sharefile, utils.Bytes2string(message.Body.Hash), &[]byte{})
 }
 
 /*
@@ -238,7 +240,8 @@ func FindFileinfo_recv(c engine.Controller, msg engine.Packet, message *message_
 	//		return
 	//	}
 
-	flood.ResponseWait(message_center.CLASS_findfileinfo, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(message_center.CLASS_findfileinfo, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(message_center.CLASS_findfileinfo, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 
 }
 
@@ -436,7 +439,8 @@ func DownloadFilechunk_recv(c engine.Controller, msg engine.Packet, message *mes
 
 	// fmt.Println("返回的文件块内容大小", len(*message.Body.Content))
 
-	flood.ResponseWait(message_center.CLASS_downloadfile, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(message_center.CLASS_downloadfile, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(message_center.CLASS_downloadfile, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 
 }
 
@@ -509,7 +513,8 @@ func Uploadinfo_recv(c engine.Controller, msg engine.Packet, message *message_ce
 	// 	engine.NLog.Error(engine.LOG_file, "%s", string(msg.Dataplus))
 	// 	return
 	// }
-	flood.ResponseWait(message_center.CLASS_uploadinfo, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(message_center.CLASS_uploadinfo, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(message_center.CLASS_uploadinfo, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 }
 
 // //根据文件hash获取1/4节点地址信息（app用）
@@ -593,6 +598,7 @@ func GetShareFolderList(c engine.Controller, msg engine.Packet, message *message
 */
 func GetShareFolderList_recv(c engine.Controller, msg engine.Packet, message *message_center.Message) {
 
-	flood.ResponseWait(message_center.CLASS_getRemoteFolderList, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	// flood.ResponseWait(message_center.CLASS_getRemoteFolderList, hex.EncodeToString(message.Body.Hash), message.Body.Content)
+	flood.ResponseWait(message_center.CLASS_getRemoteFolderList, utils.Bytes2string(message.Body.Hash), message.Body.Content)
 
 }

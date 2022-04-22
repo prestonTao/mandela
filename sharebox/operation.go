@@ -9,7 +9,6 @@ import (
 	"mandela/core/utils"
 	sconfig "mandela/sharebox/config"
 	sqldb "mandela/sqlite3_db"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -120,7 +119,8 @@ func GetRemoteShareFolderDetail(id string) (*DirVO, error) {
 
 	if message, ok, _ := message_center.SendP2pMsg(config.MSGID_sharebox_getsharefolderlist, &addrNet, nil); ok {
 		// fmt.Println("发给其他小伙伴了----")
-		bs := flood.WaitRequest(mc.CLASS_getRemoteFolderList, hex.EncodeToString(message.Body.Hash), 0)
+		// bs := flood.WaitRequest(mc.CLASS_getRemoteFolderList, hex.EncodeToString(message.Body.Hash), 0)
+		bs, _ := flood.WaitRequest(mc.CLASS_getRemoteFolderList, utils.Bytes2string(message.Body.Hash), 0)
 		// fmt.Println("有消息返回了啊")
 		if bs == nil {
 			// fmt.Println("发送共享文件消息失败，可能超时")
@@ -172,7 +172,8 @@ func UpNetFileindexAction(fi *FileIndex) error {
 		// // fmt.Println("44444444444444444444")
 		// if message.Send(MSGID_addFileShare) {
 		//fmt.Println("发给其他小伙伴了----")
-		bs := flood.WaitRequest(mc.CLASS_sharefile, hex.EncodeToString(message.Body.Hash), 0)
+		// bs := flood.WaitRequest(mc.CLASS_sharefile, hex.EncodeToString(message.Body.Hash), 0)
+		bs, _ := flood.WaitRequest(mc.CLASS_sharefile, utils.Bytes2string(message.Body.Hash), 0)
 		//fmt.Println("有消息返回了啊")
 		if bs == nil {
 			// fmt.Println("发送共享文件消息失败，可能超时")
@@ -218,7 +219,8 @@ func DownloadFileindexOpt(hash string) (fi *FileIndex, err error) {
 			// fmt.Println("开始等待查找返回", message.Body)
 			// fmt.Println("开始等待查找返回", message.Body.Hash)
 			// fmt.Println("开始等待查找返回", message.Body.Hash.B58String())
-			bs := flood.WaitRequest(mc.CLASS_findfileinfo, hex.EncodeToString(message.Body.Hash), 0)
+			// bs := flood.WaitRequest(mc.CLASS_findfileinfo, hex.EncodeToString(message.Body.Hash), 0)
+			bs, _ := flood.WaitRequest(mc.CLASS_findfileinfo, utils.Bytes2string(message.Body.Hash), 0)
 
 			// fmt.Println("开始等待查找返回000", message.Body.Hash.B58String())
 			if bs != nil {

@@ -1,6 +1,7 @@
 package virtual_node
 
 import (
+	"mandela/core/utils"
 	// "mandela/config"
 	// "mandela/core/message_center"
 	// "mandela/core/message_center/flood"
@@ -11,6 +12,7 @@ import (
 type VnodeManager struct {
 	lock              *sync.RWMutex    //
 	Vnodes            []Vnode          //多个虚拟节点
+	LogicVnodes       *sync.Map        //保存本机所有虚拟节点的逻辑虚拟节点信息key:string=AddressNetExtend;value:*Vnodeinfo=虚拟节点信息;
 	findNearVnodeChan chan FindVnodeVO //需要查找的虚拟节点
 }
 
@@ -148,21 +150,17 @@ func (this *VnodeManager) GetVnodeLogical() map[string]Vnodeinfo {
 	vnodeinfoMap := make(map[string]Vnodeinfo)
 	for _, one := range this.Vnodes {
 		selfOne := one.GetSelfVnodeinfo()
-		vnodeinfoMap[selfOne.Vid.B58String()] = selfOne
+		vnodeinfoMap[utils.Bytes2string(selfOne.Vid)] = selfOne
 
 		one.LogicalNode.Range(func(k, v interface{}) bool {
 			vnodeinfo := v.(Vnodeinfo)
-			vnodeinfoMap[vnodeinfo.Vid.B58String()] = vnodeinfo
+			vnodeinfoMap[utils.Bytes2string(vnodeinfo.Vid)] = vnodeinfo
 			return true
 		})
-		// for j, two := range one.LogicalNode {
-		// 	vnodeinfoMap[two.Vid.B58String()] = one.LogicalNode[j]
-		// }
 	}
 	//删除自己节点
 	for _, one := range this.Vnodes {
-		delete(vnodeinfoMap, one.Vnode.Vid.B58String())
-
+		delete(vnodeinfoMap, utils.Bytes2string(one.Vnode.Vid))
 	}
 	return vnodeinfoMap
 }
@@ -174,17 +172,9 @@ func (this *VnodeManager) GetVnodeSelf() []Vnodeinfo {
 	this.lock.RLock()
 	defer this.lock.RUnlock()
 
-	vnodeinfo := make([]Vnodeinfo, 0)
+	vnodeinfo := make([]Vnodeinfo, 0, len(this.Vnodes))
 	for _, one := range this.Vnodes {
 		vnodeinfo = append(vnodeinfo, one.Vnode)
-		// //----------------------------
-		// engine.Log.Info("----------------------------")
-		// engine.Log.Info("自己节点id %s", one.Vnode.Vid.B58String())
-		// one.LogicalNode.Range(func(k, v interface{}) bool {
-		// 	engine.Log.Info("逻辑节点id %s", k.(string))
-		// 	return true
-		// })
-		// //-----------------------
 	}
 
 	return vnodeinfo

@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"errors"
 	"log"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -124,4 +126,29 @@ func GetAvailablePortForTCP(addr string) net.Listener {
 		}
 	}
 	return nil
+}
+
+// IPString2Long 把ip字符串转为数值
+func IPV4String2Long(ip string) (uint32, error) {
+	b := net.ParseIP(ip).To4()
+	if b == nil {
+		return 0, errors.New("invalid ipv4 format")
+	}
+
+	return uint32(b[3]) | uint32(b[2])<<8 | uint32(b[1])<<16 | uint32(b[0])<<24, nil
+}
+
+// Long2IPString 把数值转为ip字符串
+func IPV4Long2String(i uint32) (string, error) {
+	if i > math.MaxUint32 {
+		return "", errors.New("beyond the scope of ipv4")
+	}
+
+	ip := make(net.IP, net.IPv4len)
+	ip[0] = byte(i >> 24)
+	ip[1] = byte(i >> 16)
+	ip[2] = byte(i >> 8)
+	ip[3] = byte(i)
+
+	return ip.String(), nil
 }

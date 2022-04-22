@@ -4,6 +4,7 @@ import (
 	"mandela/core/keystore"
 	"mandela/core/message_center/security_signal/doubleratchet"
 	"mandela/core/nodeStore"
+	"mandela/core/utils"
 	"sync"
 )
 
@@ -26,7 +27,7 @@ func (this *SessionManager) AddSendPipe(id nodeStore.AddressNet, sk, sharedHka, 
 	sessionKey := NewSessionKey(sk, sharedHka, sharedNhkb)
 	sessionKey.sessionHE = session
 
-	str := id.B58String()
+	str := utils.Bytes2string(id) //id.B58String()
 	value, ok := this.nodeStore.Load(str)
 	if ok {
 		session := value.(*Session)
@@ -43,7 +44,7 @@ func (this *SessionManager) AddSendPipe(id nodeStore.AddressNet, sk, sharedHka, 
 	删除发送管道
 */
 func (this *SessionManager) RemoveSendPipe(id nodeStore.AddressNet) {
-	value, ok := this.nodeStore.Load(id.B58String())
+	value, ok := this.nodeStore.Load(utils.Bytes2string(id))
 	if ok {
 		session := value.(*Session)
 		session.sendPipe = nil
@@ -54,12 +55,6 @@ func (this *SessionManager) RemoveSendPipe(id nodeStore.AddressNet) {
 	添加一个接收管道
 */
 func (this *SessionManager) AddRecvPipe(id nodeStore.AddressNet, sk, sharedHka, sharedNhkb, puk [32]byte) error {
-	// fmt.Println("添加一个接收管道 sk", hex.EncodeToString(sk[:]))
-	// fmt.Println("添加一个接收管道 sharedHka", hex.EncodeToString(sharedHka[:]))
-	// fmt.Println("添加一个接收管道 sharedNhkb", hex.EncodeToString(sharedNhkb[:]))
-	// fmt.Println("添加一个接收管道 对方puk", hex.EncodeToString(puk[:]))
-
-	// fmt.Println("----------------------")
 
 	session, err := doubleratchet.NewHEWithRemoteKey(sk, sharedHka, sharedNhkb, puk)
 	if err != nil {
@@ -69,7 +64,7 @@ func (this *SessionManager) AddRecvPipe(id nodeStore.AddressNet, sk, sharedHka, 
 	sessionKey := NewSessionKey(sk, sharedHka, sharedNhkb)
 	sessionKey.sessionHE = session
 
-	str := id.B58String()
+	str := utils.Bytes2string(id)
 	value, ok := this.nodeStore.Load(str)
 	if ok {
 		session := value.(*Session)
@@ -86,7 +81,7 @@ func (this *SessionManager) AddRecvPipe(id nodeStore.AddressNet, sk, sharedHka, 
 	获取一个发送棘轮
 */
 func (this *SessionManager) GetSendRatchet(id nodeStore.AddressNet) doubleratchet.SessionHE {
-	str := id.B58String()
+	str := utils.Bytes2string(id) //id.B58String()
 	value, ok := this.nodeStore.Load(str)
 	if !ok {
 		return nil
@@ -102,7 +97,7 @@ func (this *SessionManager) GetSendRatchet(id nodeStore.AddressNet) doubleratche
 	获取一个接收棘轮
 */
 func (this *SessionManager) GetRecvRatchet(id nodeStore.AddressNet) doubleratchet.SessionHE {
-	str := id.B58String()
+	str := utils.Bytes2string(id) //id.B58String()
 	value, ok := this.nodeStore.Load(str)
 	if !ok {
 		return nil

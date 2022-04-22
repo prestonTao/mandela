@@ -25,7 +25,7 @@ type Packet struct {
 	Size uint64 //数据包长度，包含头部4字节
 	//	RealSize  uint16 //数据包不包含头部的实际长度，并非简单的packet len – 24
 	//	Crypt_key []byte //共16字节的key
-	temp     []byte
+	// temp     []byte
 	Data     []byte
 	Dataplus []byte //未加密部分数据分开
 	Session  Session
@@ -75,20 +75,37 @@ type Packet struct {
 /* +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 func RecvPackage(conn net.Conn) (*Packet, error) {
-	// fmt.Println("packet   11111", *index, (*cache))
 	defer PrintPanicStack()
 	packet := new(Packet)
-	for len(packet.temp) < 16 {
-		cache := make([]byte, 16)
-		n, err := conn.Read(cache)
-		//	fmt.Println(n, err != nil)
+	//先读包长度
+	cache := make([]byte, 8)
+	index := uint64(0)
+	for index < 8 {
+		// cache := make([]byte, 8)
+		n, err := conn.Read(cache[index:8])
 		if err != nil {
 			return nil, err
 		}
-		packet.temp = append(packet.temp, cache[:n]...)
+		index += uint64(n)
+		// packet.temp = append(packet.temp, cache[:n]...)
+		// Log.Info("read 111 %s", hex.EncodeToString(cache[:n]))
+
 	}
-	//	log.Printf("%+v", packet.temp)
-	packet.Size = binary.LittleEndian.Uint64(packet.temp[:8])
+	// Log.Info("read 111 %s", hex.EncodeToString(cache[:]))
+	// for len(packet.temp) < 16 {
+	// 	cache := make([]byte, 16)
+	// 	n, err := conn.Read(cache)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	packet.temp = append(packet.temp, cache[:n]...)
+	// 	Log.Info("read 111 %s", hex.EncodeToString(cache[:n]))
+	// }
+
+	//解析包长度
+	packet.Size = binary.LittleEndian.Uint64(cache[:8])
+	// Log.Info("包大小 %s %d", hex.EncodeToString(cache[:8]), packet.Size)
+
 	if packet.Size > max_size {
 		//包头错误 包长度大于最大值
 		return nil, errors.New("Packet header error packet length greater than maximum")
@@ -98,17 +115,35 @@ func RecvPackage(conn net.Conn) (*Packet, error) {
 		return nil, errors.New("Packet header error packet length too small")
 	}
 
-	for uint64(len(packet.temp)) < packet.Size {
-		cache := make([]byte, packet.Size-(16))
-		n, err := conn.Read(cache)
+	//读取指定长度的包大小
+	cache = make([]byte, packet.Size-8)
+	index = uint64(0)
+	for index < packet.Size-8 {
+		n, err := conn.Read(cache[index : packet.Size-8])
 		if err != nil {
-			// Log.Error("err %v %d %d", err, n, uint64(n))
 			return nil, err
 		}
-		packet.temp = append(packet.temp, cache[:n]...)
+		index += uint64(n)
+		// packet.temp = append(packet.temp, cache[:n]...)
+		// Log.Info("read 222 %d %d %s", uint64(len(packet.temp)), packet.Size, hex.EncodeToString(cache[:n]))
 	}
-	dataSize := binary.LittleEndian.Uint64(packet.temp[8:16])
-	data := packet.temp[16 : dataSize+16]
+
+	// Log.Info("read 222 %d %s", packet.Size, hex.EncodeToString(cache[:]))
+
+	// for uint64(len(packet.temp)) < packet.Size {
+	// 	cache := make([]byte, packet.Size-(16))
+	// 	n, err := conn.Read(cache)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	packet.temp = append(packet.temp, cache[:n]...)
+	// 	Log.Info("read 222 %d %d %s", uint64(len(packet.temp)), packet.Size, hex.EncodeToString(cache[:n]))
+	// }
+
+	dataSize := binary.LittleEndian.Uint64(cache[:8])
+	// Log.Info("dataSize %s %d", hex.EncodeToString(cache[:8]), dataSize)
+	data := cache[8 : dataSize+8]
+	// Log.Info("data %s %d", hex.EncodeToString(data), dataSize)
 	//TODO 这里执行解密
 
 	netid := binary.LittleEndian.Uint32(data[:4])
@@ -116,20 +151,24 @@ func RecvPackage(conn net.Conn) (*Packet, error) {
 		//网络号错误
 		return nil, errors.New("netid error")
 	}
+	// Log.Info("netid %s %d", hex.EncodeToString(data[:4]), netid)
 	packet.MsgID = binary.LittleEndian.Uint64(data[4 : 4+8])
+	// Log.Info("MsgID %s %d", hex.EncodeToString(data[4:4+8]), packet.MsgID)
 
 	packet.Data = data[4+8:]
-	packet.Dataplus = packet.temp[dataSize+16 : packet.Size]
+	// Log.Info("Data %s", hex.EncodeToString(packet.Data))
+	packet.Dataplus = cache[dataSize+8 : packet.Size-8]
+	// Log.Info("Dataplus %s", hex.EncodeToString(cache[dataSize+8:packet.Size-8]))
 
 	//	NLog.Info(LOG_file, "RecvPackage size:%d;data长度:%d;dataplus长度:%d", packet.Size, dataSize, len(packet.Dataplus))
 
 	//--------以下代码避免内存溢出----------
-	oldtemp := packet.temp
-	packet.temp = make([]byte, uint64(len(oldtemp))-packet.Size)
-	//	fmt.Println("packet  ", uint64(len(oldtemp)), packet.Size)
-	if uint64(len(oldtemp))-packet.Size > 0 {
-		copy(packet.temp, oldtemp[packet.Size:])
-	}
+	// oldtemp := packet.temp
+	// packet.temp = make([]byte, uint64(len(oldtemp))-packet.Size)
+	// //	fmt.Println("packet  ", uint64(len(oldtemp)), packet.Size)
+	// if uint64(len(oldtemp))-packet.Size > 0 {
+	// 	copy(packet.temp, oldtemp[packet.Size:])
+	// }
 	return packet, nil
 }
 
@@ -144,6 +183,7 @@ func MarshalPacket(msgID uint64, data, dataplus *[]byte) *[]byte {
 		dataplusSize = len(*dataplus)
 	}
 	dataBuf := bytes.NewBuffer([]byte{})
+
 	binary.Write(dataBuf, binary.LittleEndian, uint32(Netid))
 	binary.Write(dataBuf, binary.LittleEndian, uint64(msgID))
 	if data != nil {
@@ -153,7 +193,9 @@ func MarshalPacket(msgID uint64, data, dataplus *[]byte) *[]byte {
 	//TODO 对dataBuf加密
 	bs := dataBuf.Bytes()
 	buf := bytes.NewBuffer([]byte{})
-	binary.Write(buf, binary.LittleEndian, uint64(8+8+len(bs)+dataplusSize))
+	totalSize := uint64(8 + 8 + len(bs) + dataplusSize)
+	binary.Write(buf, binary.LittleEndian, totalSize)
+	// Log.Info("打包头大小 %d 字节 %s", totalSize, hex.EncodeToString(buf.Bytes()))
 	binary.Write(buf, binary.LittleEndian, uint64(len(bs)))
 	buf.Write(bs)
 	if dataplus != nil {

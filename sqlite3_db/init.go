@@ -7,7 +7,8 @@ import (
 	"sync"
 
 	"github.com/go-xorm/xorm"
-	_ "github.com/mattn/go-sqlite3"
+	// _ "github.com/mattn/go-sqlite3"
+	_ "github.com/logoove/sqlite"
 )
 
 var once sync.Once
@@ -15,6 +16,7 @@ var once sync.Once
 var db *sql.DB
 
 var engineDB *xorm.Engine
+var dblock = new(sync.Mutex) //读写数据库的全局锁
 
 var (
 	table_friends          *xorm.Session //联系人表格
@@ -27,7 +29,9 @@ var (
 	table_peerinfo         *xorm.Session //节点信息，如节点公钥等
 	table_snapshot         *xorm.Session //社区节点给轻节点奖励快照
 	table_reward           *xorm.Session //社区节点给轻节点奖励信息
+	table_msgcache         *xorm.Session //消息缓存
 
+	table_wallet_txitem *xorm.Session //未花费的余额
 )
 
 func Init() {
@@ -134,39 +138,71 @@ func connect() {
 	}
 
 	//社区节点奖励快照
-	ok, err = engineDB.IsTableExist(Snapshot{})
+	ok, err = engineDB.IsTableExist(SnapshotReward{})
 	if err != nil {
 		fmt.Println(err)
 	}
 	if !ok {
-		engineDB.Table(Snapshot{}).CreateTable(Snapshot{}) //创建表格
-		table_snapshot = engineDB.Table(Snapshot{})        //切换表格
-		table_snapshot.CreateIndexes(Snapshot{})           //创建索引
-		table_snapshot.CreateUniques(Snapshot{})           //创建唯一性约束
+		engineDB.Table(SnapshotReward{}).CreateTable(SnapshotReward{}) //创建表格
+		table_snapshot = engineDB.Table(SnapshotReward{})              //切换表格
+		table_snapshot.CreateIndexes(SnapshotReward{})                 //创建索引
+		table_snapshot.CreateUniques(SnapshotReward{})                 //创建唯一性约束
 	} else {
 		//如果表存在，先删除表再创建表，目的是删除表中的所有记录
-		engineDB.Table(Snapshot{}).CreateTable(Snapshot{}) //创建表格
-		table_snapshot = engineDB.Table(Snapshot{})        //切换表格
-		table_snapshot.CreateIndexes(Snapshot{})           //创建索引
-		table_snapshot.CreateUniques(Snapshot{})           //创建唯一性约束
+		engineDB.Table(SnapshotReward{}).CreateTable(SnapshotReward{}) //创建表格
+		table_snapshot = engineDB.Table(SnapshotReward{})              //切换表格
+		table_snapshot.CreateIndexes(SnapshotReward{})                 //创建索引
+		table_snapshot.CreateUniques(SnapshotReward{})                 //创建唯一性约束
 	}
 	//社区节点奖励
-	ok, err = engineDB.IsTableExist(Reward{})
+	ok, err = engineDB.IsTableExist(RewardLight{})
 	if err != nil {
 		fmt.Println(err)
 	}
 	if !ok {
-		engineDB.Table(Reward{}).CreateTable(Reward{}) //创建表格
-		table_reward = engineDB.Table(Reward{})        //切换表格
-		table_reward.CreateIndexes(Reward{})           //创建索引
-		table_reward.CreateUniques(Reward{})           //创建唯一性约束
+		engineDB.Table(RewardLight{}).CreateTable(RewardLight{}) //创建表格
+		table_reward = engineDB.Table(RewardLight{})             //切换表格
+		table_reward.CreateIndexes(RewardLight{})                //创建索引
+		table_reward.CreateUniques(RewardLight{})                //创建唯一性约束
 	} else {
 		//如果表存在，先删除表再创建表，目的是删除表中的所有记录
-		engineDB.Table(Reward{}).CreateTable(Reward{}) //创建表格
-		table_reward = engineDB.Table(Reward{})        //切换表格
-		table_reward.CreateIndexes(Reward{})           //创建索引
-		table_reward.CreateUniques(Reward{})           //创建唯一性约束
+		engineDB.Table(RewardLight{}).CreateTable(RewardLight{}) //创建表格
+		table_reward = engineDB.Table(RewardLight{})             //切换表格
+		table_reward.CreateIndexes(RewardLight{})                //创建索引
+		table_reward.CreateUniques(RewardLight{})                //创建唯一性约束
 	}
+
+	//消息缓存
+	ok, err = engineDB.IsTableExist(MessageCache{})
+	if err != nil {
+		fmt.Println(err)
+	}
+	if !ok {
+		engineDB.Table(MessageCache{}).CreateTable(MessageCache{}) //创建表格
+		table_msgcache = engineDB.Table(MessageCache{})            //切换表格
+		table_msgcache.CreateIndexes(MessageCache{})               //创建索引
+		table_msgcache.CreateUniques(MessageCache{})               //创建唯一性约束
+	} else {
+		//如果表存在，先删除表再创建表，目的是删除表中的所有记录
+		// engineDB.Table(MessageCache{}).CreateTable(MessageCache{}) //创建表格
+		table_msgcache = engineDB.Table(MessageCache{}) //切换表格
+		table_msgcache.CreateIndexes(MessageCache{})    //创建索引
+		table_msgcache.CreateUniques(MessageCache{})    //创建唯一性约束
+	}
+	initWalletTable()
+}
+
+/*
+	初始化钱包相关数据库
+*/
+func initWalletTable() {
+
+	//如果表存在，先删除表再创建表，目的是删除表中的所有记录
+	engineDB.DropTables(TxItem{})
+	engineDB.Table(TxItem{}).CreateTable(TxItem{}) //创建表格
+	table_wallet_txitem = engineDB.Table(TxItem{}) //切换表格
+	table_wallet_txitem.CreateIndexes(TxItem{})    //创建索引
+	table_wallet_txitem.CreateUniques(TxItem{})    //创建唯一性约束
 
 }
 

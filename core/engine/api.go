@@ -13,6 +13,7 @@ var engine *Engine
 	启动一个消息引擎
 */
 func InitEngine(name string) {
+	// Log.Info("创建Engine NewEngine")
 	engine = NewEngine(name)
 }
 
@@ -43,6 +44,7 @@ func ListenByListener(listener *net.TCPListener, async bool) error {
 */
 func AddClientConn(ip string, port uint32, powerful bool) (ss Session, err error) {
 	//	engine.run()
+	// Log.Info("检查engine %v", engine)
 	session, err := engine.AddClientConn(ip, port, powerful)
 	if err != nil {
 		return nil, err
@@ -63,6 +65,11 @@ func AddInterceptor(itpr Interceptor) {
 //得到session
 func GetSession(name string) (Session, bool) {
 	return engine.GetSession(name)
+}
+
+//通过ip地址和端口获得session,可以用于是否有重复连接
+func GetSessionByHost(host string) Session {
+	return engine.GetSessionByHost(host)
 }
 
 /*

@@ -1,0 +1,38 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+
+message Message {
+    MessageHead     Head        = 1 ; //
+    MessageBody     Body        = 2 ; //
+    bytes           DataPlus    = 3 ; //body部分加密数据，消息路由时候不需要解密，临时保存
+}
+
+message MessageHead {
+    bytes            RecvId          = 1 ;  //接收者id
+    bytes            RecvSuperId     = 2 ;  //接收者的超级节点id
+    bytes            RecvVnode       = 3 ;  //接收者虚拟节点id
+    bytes            Sender          = 4 ;  //发送者id
+    bytes            SenderSuperId   = 5 ;  //发送者超级节点id
+    bytes            SenderVnode     = 6 ;  //发送者虚拟节点id
+    bool             Accurate        = 7 ;  //是否准确发送给一个节点，如果
+}
+
+message MessageBody {
+    uint64   MessageId    = 1;  //消息协议编号
+    uint64   CreateTime   = 2;  //消息创建时间unix
+    uint64   ReplyTime    = 3;  //消息回复时间unix
+    bytes    Hash         = 4;  //消息的hash值
+    bytes    ReplyHash    = 5;  //回复消息的hash
+    uint64   SendRand     = 6;  //发送随机数
+    uint64   RecvRand     = 7;  //接收随机数
+    bytes    Content      = 8;  //发送的内容
+}

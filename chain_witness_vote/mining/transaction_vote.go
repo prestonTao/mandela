@@ -8,11 +8,10 @@ import (
 	"mandela/core/keystore"
 	"mandela/core/utils"
 	"mandela/core/utils/crypto"
+	"mandela/protos/go_protos"
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
-	"strings"
 
 	"golang.org/x/crypto/ed25519"
 )
@@ -105,9 +104,9 @@ func NewVoteAddressByAddr(addr crypto.AddressCoin) VoteAddress {
 */
 type Tx_vote_in struct {
 	TxBase
-	Vote     VoteAddress        `json:"vote"`     //见证人地址
-	VoteType uint16             `json:"votetype"` //投票类型 1=给见证人投票；2=给社区节点投票；3=轻节点押金；
-	VoteAddr crypto.AddressCoin `json:"voteaddr"` //本字段不用上链。投票地址，根据域名解析的地址。
+	Vote     VoteAddress        `json:"v"`  //见证人地址
+	VoteType uint16             `json:"vt"` //投票类型 1=给见证人投票；2=给社区节点投票；3=轻节点押金；
+	VoteAddr crypto.AddressCoin `json:"va"` //本字段不用上链。投票地址，根据域名解析的地址。
 }
 
 type Tx_vote_in_VO struct {
@@ -133,6 +132,9 @@ func (this *Tx_vote_in) GetVOJSON() interface{} {
 	构建hash值得到交易id
 */
 func (this *Tx_vote_in) BuildHash() {
+	if this.Hash != nil && len(this.Hash) > 0 {
+		return
+	}
 	bs := this.Serialize()
 	// *bs = append(*bs, this.Vote...)
 
@@ -145,8 +147,56 @@ func (this *Tx_vote_in) BuildHash() {
 /*
 	格式化成json字符串
 */
-func (this *Tx_vote_in) Json() (*[]byte, error) {
-	bs, err := json.Marshal(this)
+// func (this *Tx_vote_in) Json() (*[]byte, error) {
+// 	bs, err := json.Marshal(this)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &bs, err
+// }
+
+/*
+	格式化成[]byte
+*/
+func (this *Tx_vote_in) Proto() (*[]byte, error) {
+	vins := make([]*go_protos.Vin, 0)
+	for _, one := range this.Vin {
+		vins = append(vins, &go_protos.Vin{
+			Txid: one.Txid,
+			Vout: one.Vout,
+			Puk:  one.Puk,
+			Sign: one.Sign,
+		})
+	}
+	vouts := make([]*go_protos.Vout, 0)
+	for _, one := range this.Vout {
+		vouts = append(vouts, &go_protos.Vout{
+			Value:        one.Value,
+			Address:      one.Address,
+			FrozenHeight: one.FrozenHeight,
+		})
+	}
+	txBase := go_protos.TxBase{
+		Hash:       this.Hash,
+		Type:       this.Type,
+		VinTotal:   this.Vin_total,
+		Vin:        vins,
+		VoutTotal:  this.Vout_total,
+		Vout:       vouts,
+		Gas:        this.Gas,
+		LockHeight: this.LockHeight,
+		Payload:    this.Payload,
+		BlockHash:  this.BlockHash,
+	}
+
+	txPay := go_protos.TxVoteIn{
+		TxBase:   &txBase,
+		Vote:     this.Vote,
+		VoteType: uint32(this.VoteType),
+		VoteAddr: this.VoteAddr,
+	}
+	// txPay.Marshal()
+	bs, err := txPay.Marshal()
 	if err != nil {
 		return nil, err
 	}
@@ -170,24 +220,40 @@ func (this *Tx_vote_in) Serialize() *[]byte {
 	获取签名
 */
 func (this *Tx_vote_in) GetWaitSign(txid []byte, voutIndex, vinIndex uint64) *[]byte {
-	bs, err := db.Find(txid)
-	if err != nil {
-		return nil
-	}
-	txItr, err := ParseTxBase(bs)
+
+	txItr, err := LoadTxBase(txid)
+	// txItr, err := FindTxBase(txid)
+
+	// bs, err := db.Find(txid)
+	// if err != nil {
+	// 	return nil
+	// }
+	// txItr, err := ParseTxBase(ParseTxClass(txid), bs)
 	if err != nil {
 		return nil
 	}
 
-	buf := bytes.NewBuffer(nil)
-	//上一个交易 所属的区块hash
-	buf.Write(*txItr.GetBlockHash())
-	//上一个交易的hash
-	buf.Write(*txItr.GetHash())
-	//上一个交易的指定输出序列化
-	buf.Write(*txItr.GetVoutSignSerialize(voutIndex))
-	//本交易类型输入输出数量等信息和所有输出
-	signBs := buf.Bytes()
+	blockhash, err := db.GetTxToBlockHash(&txid)
+	if err != nil || blockhash == nil {
+		return nil
+	}
+
+	voutBs := txItr.GetVoutSignSerialize(voutIndex)
+	signBs := make([]byte, 0, len(*blockhash)+len(*txItr.GetHash())+len(*voutBs))
+	signBs = append(signBs, *blockhash...)
+	signBs = append(signBs, *txItr.GetHash()...)
+	signBs = append(signBs, *voutBs...)
+
+	// buf := bytes.NewBuffer(nil)
+	// //上一个交易 所属的区块hash
+	// buf.Write(*blockhash)
+	// // buf.Write(*txItr.GetBlockHash())
+	// //上一个交易的hash
+	// buf.Write(*txItr.GetHash())
+	// //上一个交易的指定输出序列化
+	// buf.Write(*txItr.GetVoutSignSerialize(voutIndex))
+	// //本交易类型输入输出数量等信息和所有输出
+	// signBs := buf.Bytes()
 	signDst := this.GetSignSerialize(&signBs, vinIndex)
 
 	*signDst = append(*signDst, this.Vote...)
@@ -208,24 +274,41 @@ func (this *Tx_vote_in) GetWaitSign(txid []byte, voutIndex, vinIndex uint64) *[]
 	获取签名
 */
 func (this *Tx_vote_in) GetSign(key *ed25519.PrivateKey, txid []byte, voutIndex, vinIndex uint64) *[]byte {
-	bs, err := db.Find(txid)
-	if err != nil {
-		return nil
-	}
-	txItr, err := ParseTxBase(bs)
+	txItr, err := LoadTxBase(txid)
+	// txItr, err := FindTxBase(txid)
+
 	if err != nil {
 		return nil
 	}
 
-	buf := bytes.NewBuffer(nil)
-	//上一个交易 所属的区块hash
-	buf.Write(*txItr.GetBlockHash())
-	//上一个交易的hash
-	buf.Write(*txItr.GetHash())
-	//上一个交易的指定输出序列化
-	buf.Write(*txItr.GetVoutSignSerialize(voutIndex))
-	//本交易类型输入输出数量等信息和所有输出
-	signBs := buf.Bytes()
+	blockhash, err := db.GetTxToBlockHash(&txid)
+	if err != nil || blockhash == nil {
+		return nil
+	}
+
+	// if txItr.GetBlockHash() == nil {
+	// 	txItr = GetRemoteTxAndSave(txid)
+	// 	if txItr.GetBlockHash() == nil {
+	// 		return nil
+	// 	}
+	// }
+
+	voutBs := txItr.GetVoutSignSerialize(voutIndex)
+	signBs := make([]byte, 0, len(*blockhash)+len(*txItr.GetHash())+len(*voutBs))
+	signBs = append(signBs, *blockhash...)
+	signBs = append(signBs, *txItr.GetHash()...)
+	signBs = append(signBs, *voutBs...)
+
+	// buf := bytes.NewBuffer(nil)
+	// //上一个交易 所属的区块hash
+	// buf.Write(*blockhash)
+	// // buf.Write(*txItr.GetBlockHash())
+	// //上一个交易的hash
+	// buf.Write(*txItr.GetHash())
+	// //上一个交易的指定输出序列化
+	// buf.Write(*txItr.GetVoutSignSerialize(voutIndex))
+	// //本交易类型输入输出数量等信息和所有输出
+	// signBs := buf.Bytes()
 	signDst := this.GetSignSerialize(&signBs, vinIndex)
 
 	*signDst = append(*signDst, this.Vote...)
@@ -249,42 +332,63 @@ func (this *Tx_vote_in) GetSign(key *ed25519.PrivateKey, txid []byte, voutIndex,
 func (this *Tx_vote_in) Check() error {
 
 	// fmt.Println("开始验证交易合法性 Tx_deposit_in")
+	//判断vin是否太多
+	// if len(this.Vin) > config.Mining_pay_vin_max {
+	// 	return config.ERROR_pay_vin_too_much
+	// }
 
 	//1.检查输入签名是否正确，2.检查输入输出是否对等，还有手续费
 	inTotal := uint64(0)
 	for i, one := range this.Vin {
-		txbs, err := db.Find(one.Txid)
-		if err != nil {
 
-			return config.ERROR_tx_not_exist
-		}
-		txItr, err := ParseTxBase(txbs)
+		txItr, err := LoadTxBase(one.Txid)
+		// txItr, err := FindTxBase(one.Txid)
+
+		// txbs, err := db.Find(one.Txid)
+		// if err != nil {
+
+		// 	return config.ERROR_tx_not_exist
+		// }
+		// txItr, err := ParseTxBase(ParseTxClass(one.Txid), txbs)
 		if err != nil {
 			return config.ERROR_tx_format_fail
 		}
+
+		blockhash, err := db.GetTxToBlockHash(&one.Txid)
+		if err != nil || blockhash == nil {
+			return config.ERROR_tx_format_fail
+		}
+
 		vout := (*txItr.GetVout())[one.Vout]
 		//如果这个交易已经被使用，则验证不通过，否则会出现双花问题。
-		if vout.Tx != nil {
-			return config.ERROR_tx_is_use
-		}
+		// if vout.Tx != nil {
+		// 	return config.ERROR_tx_is_use
+		// }
 		inTotal = inTotal + vout.Value
 
 		//验证公钥是否和地址对应
 		addr := crypto.BuildAddr(config.AddrPre, one.Puk)
 		if !bytes.Equal(addr, (*txItr.GetVout())[one.Vout].Address) {
-			return config.ERROR_sign_fail
+			return config.ERROR_public_and_addr_notMatch
 		}
 
-		//验证签名
-		buf := bytes.NewBuffer(nil)
-		//上一个交易 所属的区块hash
-		buf.Write(*txItr.GetBlockHash())
-		//上一个交易的hash
-		buf.Write(*txItr.GetHash())
-		//上一个交易的指定输出序列化
-		buf.Write(*txItr.GetVoutSignSerialize(one.Vout))
-		//本交易类型输入输出数量等信息和所有输出
-		signBs := buf.Bytes()
+		voutBs := txItr.GetVoutSignSerialize(one.Vout)
+		signBs := make([]byte, 0, len(*blockhash)+len(*txItr.GetHash())+len(*voutBs))
+		signBs = append(signBs, *blockhash...)
+		signBs = append(signBs, *txItr.GetHash()...)
+		signBs = append(signBs, *voutBs...)
+
+		// //验证签名
+		// buf := bytes.NewBuffer(nil)
+		// //上一个交易 所属的区块hash
+		// buf.Write(*blockhash)
+		// // buf.Write(*txItr.GetBlockHash())
+		// //上一个交易的hash
+		// buf.Write(*txItr.GetHash())
+		// //上一个交易的指定输出序列化
+		// buf.Write(*txItr.GetVoutSignSerialize(one.Vout))
+		// //本交易类型输入输出数量等信息和所有输出
+		// signBs := buf.Bytes()
 
 		signDst := this.GetSignSerialize(&signBs, uint64(i))
 		//本交易特有信息
@@ -293,6 +397,9 @@ func (this *Tx_vote_in) Check() error {
 		// fmt.Println("验证签名前的字节3", len(*signDst), hex.EncodeToString(*signDst))
 		puk := ed25519.PublicKey(one.Puk)
 		// fmt.Printf("sign后:puk:%x signdst:%x sign:%x", md5.Sum(puk), md5.Sum(*signDst), md5.Sum(one.Sign))
+		if config.Wallet_print_serialize_hex {
+			engine.Log.Info("sign serialize:%s", hex.EncodeToString(*signDst))
+		}
 		if !ed25519.Verify(puk, *signDst, one.Sign) {
 			return config.ERROR_sign_fail
 		}
@@ -329,11 +436,14 @@ func (this *Tx_vote_in) GetWitness() *crypto.AddressCoin {
 */
 func (this *Tx_vote_in) SetVoteAddr(addr crypto.AddressCoin) {
 	this.VoteAddr = addr
-	bs, err := this.Json()
+	// bs, err := this.Json()
+	bs, err := this.Proto()
 	if err != nil {
 		return
 	}
-	db.Save(*this.GetHash(), bs)
+	// TxCache.FlashTxInCache(hex.EncodeToString(*this.GetHash()), this)
+	// TxCache.FlashTxInCache(this.GetHashStr(), this)
+	db.LevelDB.Save(*this.GetHash(), bs)
 }
 
 /*
@@ -342,9 +452,9 @@ func (this *Tx_vote_in) SetVoteAddr(addr crypto.AddressCoin) {
 func (this *Tx_vote_in) CheckRepeatedTx(txs ...TxItr) bool {
 
 	//判断双花
-	if !this.MultipleExpenditures(txs...) {
-		return false
-	}
+	// if !this.MultipleExpenditures(txs...) {
+	// 	return false
+	// }
 
 	addrSelf := this.Vout[0].Address
 
@@ -410,10 +520,140 @@ func (this *Tx_vote_in) CheckRepeatedTx(txs ...TxItr) bool {
 }
 
 /*
+	统计交易余额
+*/
+func (this *Tx_vote_in) CountTxItems(height uint64) *TxItemCount {
+	itemCount := TxItemCount{
+		Additems: make([]*TxItem, 0),
+		SubItems: make([]*TxSubItems, 0),
+	}
+	//将之前的UTXO标记为已经使用，余额中减去。
+	for _, vin := range this.Vin {
+		// engine.Log.Info("查看vin中的状态 %d", vin.PukIsSelf)
+		ok := vin.CheckIsSelf()
+		if !ok {
+			continue
+		}
+		// engine.Log.Info("统单易1耗时 %s %s", txItr.GetHashStr(), time.Now().Sub(start))
+		//查找这个地址的余额列表，没有则创建一个
+		itemCount.SubItems = append(itemCount.SubItems, &TxSubItems{
+			Txid:      vin.Txid, //utils.Bytes2string(vin.Txid), //  vin.GetTxidStr(),
+			VoutIndex: vin.Vout,
+			Addr:      *vin.GetPukToAddr(), // utils.Bytes2string(*vin.GetPukToAddr()), // vin.GetPukToAddrStr(),
+		})
+	}
+
+	//生成新的UTXO收益，保存到列表中
+	for voutIndex, vout := range this.Vout {
+		if voutIndex == 0 {
+			continue
+		}
+		//找出需要统计余额的地址
+		//和自己无关的地址
+		ok := vout.CheckIsSelf()
+		if !ok {
+			continue
+		}
+
+		// engine.Log.Info("统单易5耗时 %s %s", txItr.GetHashStr(), time.Now().Sub(start))
+		txItem := TxItem{
+			Addr: &(this.Vout)[voutIndex].Address, //  &vout.Address,
+			// AddrStr: vout.GetAddrStr(),                      //
+			Value: vout.Value,      //余额
+			Txid:  *this.GetHash(), //交易id
+			// TxidStr:      txHashStr,                              //
+			VoutIndex:    uint64(voutIndex), //交易输出index，从0开始
+			Height:       height,            //
+			LockupHeight: vout.FrozenHeight, //锁仓高度
+		}
+
+		//计入余额列表
+		// this.notspentBalance.AddTxItem(txItem)
+		itemCount.Additems = append(itemCount.Additems, &txItem)
+
+		//保存到缓存
+		// engine.Log.Info("开始统计交易余额 区块高度 %d 保存到缓存", bhvo.BH.Height)
+		// TxCache.AddTxInTxItem(txHashStr, txItr)
+		TxCache.AddTxInTxItem(*this.GetHash(), this)
+
+	}
+	return &itemCount
+}
+
+func (this *Tx_vote_in) CountTxHistory(height uint64) {
+	//转出历史记录
+	hiOut := HistoryItem{
+		IsIn:    false,                          //资金转入转出方向，true=转入;false=转出;
+		Type:    this.Class(),                   //交易类型
+		InAddr:  make([]*crypto.AddressCoin, 0), //输入地址
+		OutAddr: make([]*crypto.AddressCoin, 0), //输出地址
+		// Value:   (*preTxItr.GetVout())[vin.Vout].Value, //交易金额
+		// Value:  amount,          //交易金额
+		Txid:   *this.GetHash(), //交易id
+		Height: height,          //
+		// OutIndex: uint64(voutIndex),           //交易输出index，从0开始
+	}
+	//转入历史记录
+	// hiIn := HistoryItem{
+	// 	IsIn:    true,                           //资金转入转出方向，true=转入;false=转出;
+	// 	Type:    this.Class(),                   //交易类型
+	// 	InAddr:  make([]*crypto.AddressCoin, 0), //输入地址
+	// 	OutAddr: make([]*crypto.AddressCoin, 0), //输出地址
+	// 	// Value:   (*preTxItr.GetVout())[vin.Vout].Value, //交易金额
+	// 	// Value:  amount,          //交易金额
+	// 	Txid:   *this.GetHash(), //交易id
+	// 	Height: height,          //
+	// 	// OutIndex: uint64(voutIndex),           //交易输出index，从0开始
+	// }
+	//
+	addrCoin := make(map[string]bool)
+	for _, vin := range this.Vin {
+		addrInfo, isSelf := keystore.FindPuk(vin.Puk)
+		// hiIn.InAddr = append(hiIn.InAddr, &addrInfo.Addr)
+		if !isSelf {
+			continue
+		}
+		if _, ok := addrCoin[utils.Bytes2string(addrInfo.Addr)]; ok {
+			continue
+		} else {
+			addrCoin[utils.Bytes2string(addrInfo.Addr)] = false
+		}
+		hiOut.InAddr = append(hiOut.InAddr, &addrInfo.Addr)
+	}
+
+	//生成新的UTXO收益，保存到列表中
+	addrCoin = make(map[string]bool)
+	for voutIndex, vout := range this.Vout {
+		if voutIndex != 0 {
+			continue
+		}
+		hiOut.OutAddr = append(hiOut.OutAddr, &vout.Address)
+		hiOut.Value += vout.Value
+		_, ok := keystore.FindAddress(vout.Address)
+		if !ok {
+			continue
+		}
+		// hiIn.Value += vout.Value
+		if _, ok := addrCoin[utils.Bytes2string(vout.Address)]; ok {
+			continue
+		} else {
+			addrCoin[utils.Bytes2string(vout.Address)] = false
+		}
+		// hiIn.OutAddr = append(hiIn.OutAddr, &vout.Address)
+	}
+	if len(hiOut.InAddr) > 0 {
+		balanceHistoryManager.Add(hiOut)
+	}
+	// if len(hiIn.OutAddr) > 0 {
+	// 	balanceHistoryManager.Add(hiIn)
+	// }
+}
+
+/*
 	创建一个见证人投票交易
 	@amount    uint64    押金额度
 */
-func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr string, amount, gas uint64, pwd, payload string) (*Tx_vote_in, error) {
+func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr crypto.AddressCoin, amount, gas uint64, pwd, payload string) (*Tx_vote_in, error) {
 	// if amount < config.Mining_vote {
 	// 	// fmt.Println("投票交押金数量最少", config.Mining_vote)
 	// 	return nil, errors.New("投票交押金数量最少" + strconv.Itoa(config.Mining_vote))
@@ -422,7 +662,7 @@ func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr string
 	chain := forks.GetLongChain()
 	_, block := chain.GetLastBlock()
 	//查找余额
-	vins := make([]Vin, 0)
+	vins := make([]*Vin, 0)
 	// total := uint64(0)
 	// keys := keystore.GetAddr()
 	// for _, one := range keys {
@@ -462,11 +702,15 @@ func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr string
 	// 	return nil, errors.New("余额不足")
 	// }
 
-	total, items := chain.balance.BuildPayVin(amount + gas)
+	total, items := chain.balance.BuildPayVin(nil, amount+gas)
 
 	if total < amount+gas {
 		//资金不够
 		return nil, config.ERROR_not_enough // errors.New("余额不足")
+	}
+
+	if len(items) > config.Mining_pay_vin_max {
+		return nil, config.ERROR_pay_vin_too_much
 	}
 
 	for _, item := range items {
@@ -476,60 +720,53 @@ func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr string
 		}
 		// fmt.Println("创建交易时候公钥", hex.EncodeToString(puk))
 		vin := Vin{
-			Txid: item.Txid,     //UTXO 前一个交易的id
-			Vout: item.OutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
-			Puk:  puk,           //公钥
+			Txid: item.Txid,      //UTXO 前一个交易的id
+			Vout: item.VoutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
+			Puk:  puk,            //公钥
 			//					Sign: *sign,           //签名
 		}
-		vins = append(vins, vin)
+		vins = append(vins, &vin)
 	}
 
 	//解析转账目标账户地址
-	var dstAddr crypto.AddressCoin
-	if addr == "" {
+	var dstAddr crypto.AddressCoin = addr
+
+	if addr == nil {
 		// fmt.Println("自己地址数量", len(keystore.GetAddr()))
 		//为空则转给自己
-		dstAddr = keystore.GetAddr()[0]
-	} else {
-		// var err error
-		// *dstAddr, err = utils.FromB58String(addr)
-		// if err != nil {
-		// 	// fmt.Println("解析地址失败")
-		// 	return nil
-		// }
-		dstAddr = crypto.AddressFromB58String(addr)
+		dstAddr = keystore.GetAddr()[0].Addr
 	}
 
 	//构建交易输出
-	vouts := make([]Vout, 0)
+	vouts := make([]*Vout, 0)
 	//下标为0的交易输出是见证人押金，大于0的输出是多余的钱退还。
 	vout := Vout{
 		Value:   amount,  //输出金额 = 实际金额 * 100000000
 		Address: dstAddr, //钱包地址
 	}
-	vouts = append(vouts, vout)
+	vouts = append(vouts, &vout)
 	//检查押金是否刚刚好，多了的转账给自己
 	//TODO 将剩余款项转入新的地址，保证资金安全
 	if total > amount+gas {
 		vout := Vout{
-			Value:   total - amount - gas,  //输出金额 = 实际金额 * 100000000
-			Address: keystore.GetAddr()[0], //钱包地址
+			Value:   total - amount - gas,       //输出金额 = 实际金额 * 100000000
+			Address: keystore.GetAddr()[0].Addr, //钱包地址
 		}
-		vouts = append(vouts, vout)
+		vouts = append(vouts, &vout)
 	}
 
 	var txin *Tx_vote_in
 	for i := uint64(0); i < 10000; i++ {
 		//
 		base := TxBase{
-			Type:       config.Wallet_tx_type_vote_in, //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
-			Vin_total:  uint64(len(vins)),             //输入交易数量
-			Vin:        vins,                          //交易输入
-			Vout_total: uint64(len(vouts)),            //输出交易数量
-			Vout:       vouts,                         //
-			Gas:        gas,                           //交易手续费
-			LockHeight: block.Height + 100 + i,        //锁定高度
-			Payload:    []byte(payload),               //
+			Type:       config.Wallet_tx_type_vote_in,                  //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
+			Vin_total:  uint64(len(vins)),                              //输入交易数量
+			Vin:        vins,                                           //交易输入
+			Vout_total: uint64(len(vouts)),                             //输出交易数量
+			Vout:       vouts,                                          //
+			Gas:        gas,                                            //交易手续费
+			LockHeight: block.Height + config.Wallet_tx_lockHeight + i, //锁定高度
+			Payload:    []byte(payload),                                //
 			// CreateTime: time.Now().Unix(),             //创建时间
 		}
 
@@ -543,7 +780,7 @@ func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr string
 		for i, one := range txin.Vin {
 			for _, key := range keystore.GetAddr() {
 
-				puk, ok := keystore.GetPukByAddr(key)
+				puk, ok := keystore.GetPukByAddr(key.Addr)
 				if !ok {
 					// fmt.Println("签名出错 1111111111")
 					//签名出错
@@ -551,7 +788,7 @@ func CreateTxVoteIn(voteType uint16, witnessAddr crypto.AddressCoin, addr string
 				}
 
 				if bytes.Equal(puk, one.Puk) {
-					_, prk, _, err := keystore.GetKeyByAddr(key, pwd)
+					_, prk, _, err := keystore.GetKeyByAddr(key.Addr, pwd)
 					// prk, err := key.GetPriKey(pwd)
 					if err != nil {
 						// fmt.Println("签名出错 2222222222222", err.Error())
@@ -593,6 +830,9 @@ func (this *Tx_vote_out) GetVOJSON() interface{} {
 	构建hash值得到交易id
 */
 func (this *Tx_vote_out) BuildHash() {
+	if this.Hash != nil && len(this.Hash) > 0 {
+		return
+	}
 	bs := this.Serialize()
 
 	id := make([]byte, 8)
@@ -604,34 +844,39 @@ func (this *Tx_vote_out) BuildHash() {
 /*
 	格式化成json字符串
 */
-func (this *Tx_vote_out) Json() (*[]byte, error) {
-	bs, err := json.Marshal(this)
-	if err != nil {
-		return nil, err
-	}
-	return &bs, err
-}
+// func (this *Tx_vote_out) Json() (*[]byte, error) {
+// 	bs, err := json.Marshal(this)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return &bs, err
+// }
 
 /*
 	验证是否合法
 */
 func (this *Tx_vote_out) Check() error {
-	if err := this.TxBase.CheckBase(); err != nil {
-		return err
-	}
+	//判断vin是否太多
+	// if len(this.Vin) > config.Mining_pay_vin_max {
+	// 	return config.ERROR_pay_vin_too_much
+	// }
+	// if err := this.TxBase.CheckBase(lockHeight); err != nil {
+	// 	return err
+	// }
 	//退回轻节点押金，需要取消所有投票
 	for _, oneVin := range this.Vin {
 		//
 		if oneVin.Vout != 0 {
 			continue
 		}
-
-		bs, err := db.Find(oneVin.Txid)
-		if err != nil {
-			//不能找到上一个交易，程序出错退出
-			return config.ERROR_tx_not_exist
-		}
-		txItr, err := ParseTxBase(bs)
+		txItr, err := LoadTxBase(oneVin.Txid)
+		// txItr, err := FindTxBase(oneVin.Txid)
+		// bs, err := db.Find(oneVin.Txid)
+		// if err != nil {
+		// 	//不能找到上一个交易，程序出错退出
+		// 	return config.ERROR_tx_not_exist
+		// }
+		// txItr, err := ParseTxBase(ParseTxClass(oneVin.Txid), bs)
 		if err != nil {
 			//不能解析上一个交易，程序出错退出
 			return config.ERROR_tx_format_fail
@@ -675,114 +920,206 @@ func (this *Tx_vote_out) GetWitness() *crypto.AddressCoin {
 */
 func (this *Tx_vote_out) CheckRepeatedTx(txs ...TxItr) bool {
 	//判断双花
-	if !this.MultipleExpenditures(txs...) {
-		return false
-	}
+	// if !this.MultipleExpenditures(txs...) {
+	// 	return false
+	// }
 	return true
+}
+
+/*
+	统计交易余额
+*/
+func (this *Tx_vote_out) CountTxItems(height uint64) *TxItemCount {
+	itemCount := TxItemCount{
+		Additems: make([]*TxItem, 0),
+		SubItems: make([]*TxSubItems, 0),
+	}
+	//将之前的UTXO标记为已经使用，余额中减去。
+	for _, vin := range this.Vin {
+		// engine.Log.Info("查看vin中的状态 %d", vin.PukIsSelf)
+		ok := vin.CheckIsSelf()
+		if !ok {
+			continue
+		}
+		// engine.Log.Info("统单易1耗时 %s %s", txItr.GetHashStr(), time.Now().Sub(start))
+		//查找这个地址的余额列表，没有则创建一个
+		itemCount.SubItems = append(itemCount.SubItems, &TxSubItems{
+			Txid:      vin.Txid, //utils.Bytes2string(vin.Txid), //  vin.GetTxidStr(),
+			VoutIndex: vin.Vout,
+			Addr:      *vin.GetPukToAddr(), // utils.Bytes2string(*vin.GetPukToAddr()), // vin.GetPukToAddrStr(),
+		})
+	}
+
+	//生成新的UTXO收益，保存到列表中
+	for voutIndex, vout := range this.Vout {
+		// if voutIndex == 0 {
+		// 	continue
+		// }
+		//找出需要统计余额的地址
+		//和自己无关的地址
+		ok := vout.CheckIsSelf()
+		if !ok {
+			continue
+		}
+
+		// engine.Log.Info("统单易5耗时 %s %s", txItr.GetHashStr(), time.Now().Sub(start))
+		txItem := TxItem{
+			Addr: &(this.Vout)[voutIndex].Address, //  &vout.Address,
+			// AddrStr: vout.GetAddrStr(),                      //
+			Value: vout.Value,      //余额
+			Txid:  *this.GetHash(), //交易id
+			// TxidStr:      txHashStr,                              //
+			VoutIndex:    uint64(voutIndex), //交易输出index，从0开始
+			Height:       height,            //
+			LockupHeight: vout.FrozenHeight, //锁仓高度
+		}
+
+		//计入余额列表
+		// this.notspentBalance.AddTxItem(txItem)
+		itemCount.Additems = append(itemCount.Additems, &txItem)
+
+		//保存到缓存
+		// engine.Log.Info("开始统计交易余额 区块高度 %d 保存到缓存", bhvo.BH.Height)
+		// TxCache.AddTxInTxItem(txHashStr, txItr)
+		TxCache.AddTxInTxItem(*this.GetHash(), this)
+
+	}
+	return &itemCount
+}
+
+func (this *Tx_vote_out) CountTxHistory(height uint64) {
+	//转出历史记录
+	// hiOut := HistoryItem{
+	// 	IsIn:    false,                          //资金转入转出方向，true=转入;false=转出;
+	// 	Type:    this.Class(),                   //交易类型
+	// 	InAddr:  make([]*crypto.AddressCoin, 0), //输入地址
+	// 	OutAddr: make([]*crypto.AddressCoin, 0), //输出地址
+	// 	// Value:   (*preTxItr.GetVout())[vin.Vout].Value, //交易金额
+	// 	// Value:  amount,          //交易金额
+	// 	Txid:   *this.GetHash(), //交易id
+	// 	Height: height,          //
+	// 	// OutIndex: uint64(voutIndex),           //交易输出index，从0开始
+	// }
+	//转入历史记录
+	hiIn := HistoryItem{
+		IsIn:    true,                           //资金转入转出方向，true=转入;false=转出;
+		Type:    this.Class(),                   //交易类型
+		InAddr:  make([]*crypto.AddressCoin, 0), //输入地址
+		OutAddr: make([]*crypto.AddressCoin, 0), //输出地址
+		// Value:   (*preTxItr.GetVout())[vin.Vout].Value, //交易金额
+		// Value:  amount,          //交易金额
+		Txid:   *this.GetHash(), //交易id
+		Height: height,          //
+		// OutIndex: uint64(voutIndex),           //交易输出index，从0开始
+	}
+	//
+	addrCoin := make(map[string]bool)
+	for _, vin := range this.Vin {
+		addrInfo, isSelf := keystore.FindPuk(vin.Puk)
+		hiIn.InAddr = append(hiIn.InAddr, &addrInfo.Addr)
+		if !isSelf {
+			continue
+		}
+		if _, ok := addrCoin[utils.Bytes2string(addrInfo.Addr)]; ok {
+			continue
+		} else {
+			addrCoin[utils.Bytes2string(addrInfo.Addr)] = false
+		}
+		// hiOut.InAddr = append(hiOut.InAddr, &addrInfo.Addr)
+	}
+
+	//生成新的UTXO收益，保存到列表中
+	addrCoin = make(map[string]bool)
+	for _, vout := range this.Vout {
+		// hiOut.OutAddr = append(hiOut.OutAddr, &vout.Address)
+		// hiOut.Value += vout.Value
+		_, ok := keystore.FindAddress(vout.Address)
+		if !ok {
+			continue
+		}
+		hiIn.Value += vout.Value
+		if _, ok := addrCoin[utils.Bytes2string(vout.Address)]; ok {
+			continue
+		} else {
+			addrCoin[utils.Bytes2string(vout.Address)] = false
+		}
+		hiIn.OutAddr = append(hiIn.OutAddr, &vout.Address)
+	}
+	// if len(hiOut.InAddr) > 0 {
+	// 	balanceHistoryManager.Add(hiOut)
+	// }
+	if len(hiIn.OutAddr) > 0 {
+		balanceHistoryManager.Add(hiIn)
+	}
 }
 
 /*
 	创建一个投票押金退还交易
 	退还按交易为单位，交易的押金全退
 */
-func CreateTxVoteOut(witness *crypto.AddressCoin, txid, addr string, amount, gas uint64, pwd string) (*Tx_vote_out, error) {
+func CreateTxVoteOut(txid []byte, addr crypto.AddressCoin, amount, gas uint64, pwd string) (*Tx_vote_out, error) {
 	// fmt.Println("==============1")
 	chain := forks.GetLongChain()
 	_, block := chain.GetLastBlock()
-	b := chain.balance.GetVoteIn(witness.B58String())
-	if b == nil {
-		// fmt.Println("++++押金不够")
-		//
-		return nil, config.ERROR_tx_not_exist // errors.New("交易不存在")
-	}
-	// fmt.Println("==============2")
 	//查找余额
-	vins := make([]Vin, 0)
+	vins := make([]*Vin, 0)
 	total := uint64(0)
 
-	if txid == "" {
-		b.Txs.Range(func(k, v interface{}) bool {
-			item := v.(*TxItem)
-			bs, err := db.Find(item.Txid)
-			if err != nil {
-				return false
-			}
-			txItr, err := ParseTxBase(bs)
-			if err != nil {
-				return false
-			}
-			vout := (*txItr.GetVout())[item.OutIndex]
+	var item = chain.balance.GetVoteInByTxid(txid)
+	// var item *TxItem
+	// b.Txs.Range(func(txidItr, v interface{}) bool {
+	// 	dstTxid := txidItr.(string)
+	// 	//0600000000000000b027d84883693a16de4df892c4d856cbf103ed0e28a2d5d98277199ea2d79345_0
+	// 	if utils.Bytes2string(txid) == strings.SplitN(dstTxid, "_", 2)[0] {
+	// 		item = v.(*TxItem)
+	// 		return false
+	// 	}
+	// 	return true
+	// })
 
-			puk, ok := keystore.GetPukByAddr(vout.Address)
-			if !ok {
-				return false
-			}
-
-			vin := Vin{
-				Txid: item.Txid,     //UTXO 前一个交易的id
-				Vout: item.OutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
-				Puk:  puk,           //公钥
-				//			Sign: *sign,         //签名
-			}
-			vins = append(vins, vin)
-
-			total = total + item.Value
-			if total >= amount+gas {
-				return false
-			}
-			return true
-		})
-	} else {
-		var item *TxItem
-		b.Txs.Range(func(txidItr, v interface{}) bool {
-			dstTxid := txidItr.(string)
-			//0600000000000000b027d84883693a16de4df892c4d856cbf103ed0e28a2d5d98277199ea2d79345_0
-			if txid == strings.SplitN(dstTxid, "_", 2)[0] {
-				item = v.(*TxItem)
-				return false
-			}
-			return true
-		})
-
-		if item == nil {
-			//未找到这个交易
-			return nil, config.ERROR_tx_not_exist // errors.New("未找到这个交易")
-		}
-
-		bs, err := db.Find(item.Txid)
-		if err != nil {
-			return nil, err
-		}
-		txItr, err := ParseTxBase(bs)
-		if err != nil {
-			return nil, err
-		}
-		vout := (*txItr.GetVout())[item.OutIndex]
-
-		puk, ok := keystore.GetPukByAddr(vout.Address)
-		if !ok {
-			return nil, config.ERROR_public_key_not_exist
-		}
-
-		vin := Vin{
-			Txid: item.Txid,     //UTXO 前一个交易的id
-			Vout: item.OutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
-			Puk:  puk,           //公钥
-			//			Sign: *sign,         //签名
-		}
-		vins = append(vins, vin)
-		total = total + item.Value
+	if item == nil {
+		//未找到这个交易
+		return nil, config.ERROR_tx_not_exist // errors.New("未找到这个交易")
 	}
+	txItr, err := LoadTxBase(item.Txid)
+	// txItr, err := FindTxBase(item.Txid)
+	// bs, err := db.Find(item.Txid)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// txItr, err := ParseTxBase(ParseTxClass(item.Txid), bs)
+	if err != nil {
+		return nil, err
+	}
+	vout := (*txItr.GetVout())[item.VoutIndex]
+
+	puk, ok := keystore.GetPukByAddr(vout.Address)
+	if !ok {
+		return nil, config.ERROR_public_key_not_exist
+	}
+
+	vin := Vin{
+		Txid: item.Txid,      //UTXO 前一个交易的id
+		Vout: item.VoutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
+		Puk:  puk,            //公钥
+		//			Sign: *sign,         //签名
+	}
+	vins = append(vins, &vin)
+	total = total + item.Value
 
 	// fmt.Println("==============3")
 	//资金不够
 	if total < amount+gas {
 		//余额不够给手续费，需要从其他账户余额作为输入给手续费
-		totalAll, items := chain.balance.BuildPayVin(amount + gas - total)
+		totalAll, items := chain.balance.BuildPayVin(nil, amount+gas-total)
 		total = total + totalAll
 		if total < amount+gas {
 			//资金不够
 			return nil, config.ERROR_not_enough // errors.New("余额不足")
+		}
+
+		if len(items) > config.Mining_pay_vin_max {
+			return nil, config.ERROR_pay_vin_too_much
 		}
 
 		for _, item := range items {
@@ -792,34 +1129,31 @@ func CreateTxVoteOut(witness *crypto.AddressCoin, txid, addr string, amount, gas
 			}
 			// fmt.Println("创建交易时候公钥", hex.EncodeToString(puk))
 			vin := Vin{
-				Txid: item.Txid,     //UTXO 前一个交易的id
-				Vout: item.OutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
-				Puk:  puk,           //公钥
+				Txid: item.Txid,      //UTXO 前一个交易的id
+				Vout: item.VoutIndex, //一个输出索引（vout），用于标识来自该交易的哪个UTXO被引用（第一个为零）
+				Puk:  puk,            //公钥
 				//					Sign: *sign,           //签名
 			}
-			vins = append(vins, vin)
+			vins = append(vins, &vin)
 		}
-
 	}
 
 	//解析转账目标账户地址
-	var dstAddr crypto.AddressCoin
-	if addr == "" {
+	var dstAddr crypto.AddressCoin = addr
+	if addr == nil {
 		//为空则转给自己
-		dstAddr = keystore.GetAddr()[0]
-	} else {
-		dstAddr = crypto.AddressFromB58String(addr)
+		dstAddr = keystore.GetAddr()[0].Addr
 	}
 	// fmt.Println("==============6")
 
 	//构建交易输出
-	vouts := make([]Vout, 0)
+	vouts := make([]*Vout, 0)
 	//下标为0的交易输出是见证人押金，大于0的输出是多余的钱退还。
-	vout := Vout{
+	vout2 := Vout{
 		Value:   total - gas, //输出金额 = 实际金额 * 100000000
 		Address: dstAddr,     //钱包地址
 	}
-	vouts = append(vouts, vout)
+	vouts = append(vouts, &vout2)
 
 	//	crateTime := time.Now().Unix()
 
@@ -827,13 +1161,13 @@ func CreateTxVoteOut(witness *crypto.AddressCoin, txid, addr string, amount, gas
 	for i := uint64(0); i < 10000; i++ {
 		//
 		base := TxBase{
-			Type:       config.Wallet_tx_type_vote_out, //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
-			Vin_total:  uint64(len(vins)),              //输入交易数量
-			Vin:        vins,                           //交易输入
-			Vout_total: uint64(len(vouts)),             //输出交易数量
-			Vout:       vouts,                          //
-			Gas:        gas,                            //交易手续费
-			LockHeight: block.Height + 100 + i,         //锁定高度
+			Type:       config.Wallet_tx_type_vote_out,                 //交易类型，默认0=挖矿所得，没有输入;1=普通转账到地址交易
+			Vin_total:  uint64(len(vins)),                              //输入交易数量
+			Vin:        vins,                                           //交易输入
+			Vout_total: uint64(len(vouts)),                             //输出交易数量
+			Vout:       vouts,                                          //
+			Gas:        gas,                                            //交易手续费
+			LockHeight: block.Height + config.Wallet_tx_lockHeight + i, //锁定高度
 			// CreateTime: time.Now().Unix(),              //创建时间
 		}
 		txout = &Tx_vote_out{
@@ -844,14 +1178,14 @@ func CreateTxVoteOut(witness *crypto.AddressCoin, txid, addr string, amount, gas
 		//给输出签名，防篡改
 		for i, one := range txout.Vin {
 			for _, key := range keystore.GetAddr() {
-				puk, ok := keystore.GetPukByAddr(key)
+				puk, ok := keystore.GetPukByAddr(key.Addr)
 				if !ok {
 					//未找到公钥
 					return nil, config.ERROR_public_key_not_exist // errors.New("未找到公钥")
 				}
 
 				if bytes.Equal(puk, one.Puk) {
-					_, prk, _, err := keystore.GetKeyByAddr(key, pwd)
+					_, prk, _, err := keystore.GetKeyByAddr(key.Addr, pwd)
 
 					// prk, err := key.GetPriKey(pwd)
 					if err != nil {

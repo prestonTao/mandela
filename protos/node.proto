@@ -1,0 +1,38 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+
+
+message NodeRepeated {
+	repeated Node nodes     =1;  //
+}
+
+
+
+message Node {
+    IdInfo   IdInfo         = 1 ;     //节点id信息，id字符串以16进制显示
+    bool     IsSuper        = 2 ;     //是不是超级节点，超级节点有外网ip地址，可以为其他节点提供代理服务
+    string   Addr           = 3 ;     //外网ip地址
+    uint32   TcpPort        = 4 ;     //TCP端口
+    bool     IsApp          = 5 ;     //是不是手机端节点
+    int64    MachineID      = 6 ;     //每个节点启动的时候生成一个随机数，用作判断多个节点使用同一个key连入网络的情况
+    uint64   Version        = 7 ;     //版本号
+}
+
+message IdInfo {
+    bytes          Id     = 1 ; //id，节点网络地址
+    bytes          EPuk   = 2 ; //ed25519公钥，身份密钥的公钥
+    bytes          CPuk   = 3 ; //curve25519公钥,DH公钥
+    uint32         V      = 4 ; //DH公钥版本，低版本将被弃用，用于自动升级更换DH公钥协议
+    bytes          Sign   = 5 ; //ed25519私钥签名,Sign(V + CPuk)
+}
+
+

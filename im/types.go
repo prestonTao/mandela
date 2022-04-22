@@ -2,9 +2,11 @@ package im
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 //消息文件
 type FileInfo struct {

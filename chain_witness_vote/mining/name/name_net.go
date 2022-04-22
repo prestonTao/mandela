@@ -5,43 +5,60 @@ import (
 	"mandela/config"
 	"mandela/core/nodeStore"
 	"mandela/core/utils"
-	"bytes"
-	"encoding/json"
+	// "bytes"
+	// jsoniter "github.com/json-iterator/go"
 )
+
+// var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 /*
 	在网络中查找域名
 */
-func FindNameToNet(name string) *Nameinfo {
-	// engine.Log.Info("本次查找域名 %s", name)
-	dbKey := append([]byte(config.Name), []byte(name)...)
-	// db.Remove(dbKey)
-	// engine.Log.Info("查找的域名key %s %s", string(dbKey), hex.EncodeToString(dbKey))
-	txbs, err := db.Find(dbKey)
-	if err != nil {
-		// engine.Log.Info()
-		return nil
-	}
-	// engine.Log.Info("查找到域名")
-	nameinfo := new(Nameinfo)
-	decoder := json.NewDecoder(bytes.NewBuffer(*txbs))
-	decoder.UseNumber()
-	err = decoder.Decode(nameinfo)
-	// err = json.Unmarshal(*txbs, nameinfo)
-	if err != nil {
-		// engine.Log.Info("域名解析错误 %s", err.Error())
-		return nil
-	}
-	// engine.Log.Info("查找到域名2")
-	return nameinfo
+// func FindNameToNet(name string) *Nameinfo {
+// 	// engine.Log.Info("本次查找域名 %s", name)
+// 	dbKey := append([]byte(config.Name), []byte(name)...)
+// 	// db.Remove(dbKey)
+// 	// engine.Log.Info("查找的域名key %s %s", string(dbKey), hex.EncodeToString(dbKey))
+// 	txbs, err := db.Find(dbKey)
+// 	if err != nil {
+// 		// engine.Log.Info()
+// 		return nil
+// 	}
+// 	// engine.Log.Info("查找到域名")
+// 	nameinfo := new(Nameinfo)
+// 	// var jso = jsoniter.ConfigCompatibleWithStandardLibrary
+// 	// err = jso.Unmarshal(*txbs, nameinfo)
+// 	decoder := json.NewDecoder(bytes.NewBuffer(*txbs))
+// 	decoder.UseNumber()
+// 	err = decoder.Decode(nameinfo)
+// 	if err != nil {
+// 		// engine.Log.Info("域名解析错误 %s", err.Error())
+// 		return nil
+// 	}
+// 	// engine.Log.Info("查找到域名2")
+// 	return nameinfo
 
-	// //判断域名是否过期，过期了就删除掉
-	// if (nameinfo.Height + NameOfValidity) > height {
-	// 	return nameinfo
-	// }
-	// //已经过期
-	// db.Remove(dbKey)
-	// return nil
+// 	// //判断域名是否过期，过期了就删除掉
+// 	// if (nameinfo.Height + NameOfValidity) > height {
+// 	// 	return nameinfo
+// 	// }
+// 	// //已经过期
+// 	// db.Remove(dbKey)
+// 	// return nil
+// }
+
+func FindNameToNet(name string) *Nameinfo {
+	dbKey := append([]byte(config.Name), []byte(name)...)
+	txbs, err := db.LevelTempDB.Find(dbKey)
+	if err != nil {
+		return nil
+	}
+
+	nameinfo, err := ParseNameinfo(*txbs)
+	if err != nil {
+		return nil
+	}
+	return nameinfo
 }
 
 /*

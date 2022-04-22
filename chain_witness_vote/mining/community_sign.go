@@ -5,9 +5,10 @@ import (
 	"mandela/core/keystore"
 	"mandela/core/utils"
 	"mandela/core/utils/crypto"
-	"bytes"
+	"mandela/protos/go_protos"
 	"crypto/ed25519"
-	"encoding/json"
+
+	gogoproto "github.com/gogo/protobuf/proto"
 )
 
 const (
@@ -23,20 +24,50 @@ type CommunitySign struct {
 	Sign        []byte //签名
 }
 
-func (this *CommunitySign) Json() []byte {
-	bs, _ := json.Marshal(this)
+// func (this *CommunitySign) Json() []byte {
+// 	bs, _ := json.Marshal(this)
+// 	return bs
+// }
+
+func (this *CommunitySign) Protobuf() []byte {
+	csp := go_protos.CommunitySign{
+		Type:        this.Type,
+		StartHeight: this.StartHeight,
+		EndHeight:   this.EndHeight,
+		Rand:        this.Rand,
+		Puk:         this.Puk,
+		Sign:        this.Sign,
+	}
+	bs, _ := csp.Marshal()
+	// bs, _ := gogoproto.Marshal(csp)
+
+	// bs, _ := json.Marshal(this)
 	return bs
 }
 
 func ParseCommunitySign(bs []byte) (*CommunitySign, error) {
-	cs := new(CommunitySign)
-	decoder := json.NewDecoder(bytes.NewBuffer(bs))
-	decoder.UseNumber()
-	err := decoder.Decode(cs)
+	csp := new(go_protos.CommunitySign)
+	err := gogoproto.Unmarshal(bs, csp)
 	if err != nil {
 		return nil, err
 	}
-	return cs, nil
+
+	cs := CommunitySign{
+		Type:        csp.Type,        //类型
+		StartHeight: csp.StartHeight, //快照开始高度
+		EndHeight:   csp.EndHeight,   //快照结束高度
+		Rand:        csp.Rand,        //随机数
+		Puk:         csp.Puk,         //公钥
+		Sign:        csp.Sign,        //签名
+	}
+	return &cs, nil
+	// decoder := json.NewDecoder(bytes.NewBuffer(bs))
+	// decoder.UseNumber()
+	// err := decoder.Decode(cs)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// return cs, nil
 }
 
 func NewCommunitySign(puk []byte, startHeight, endHeight uint64) *CommunitySign {
@@ -57,7 +88,7 @@ func NewCommunitySign(puk []byte, startHeight, endHeight uint64) *CommunitySign 
 */
 func SignPayload(txItr TxItr, puk []byte, prk ed25519.PrivateKey, startHeight, endHeight uint64) TxItr {
 	cs := NewCommunitySign(puk, startHeight, endHeight)
-	txItr.SetPayload(cs.Json())
+	txItr.SetPayload(cs.Protobuf())
 	//所有签名字段设置为空
 	for i, _ := range *txItr.GetVin() {
 		txItr.SetSign(uint64(i), nil)
@@ -65,7 +96,7 @@ func SignPayload(txItr TxItr, puk []byte, prk ed25519.PrivateKey, startHeight, e
 	signDst := txItr.Serialize()
 	sign := keystore.Sign(prk, *signDst)
 	cs.Sign = sign
-	txItr.SetPayload(cs.Json())
+	txItr.SetPayload(cs.Protobuf())
 	return txItr
 }
 
@@ -93,7 +124,7 @@ func CheckPayload(txItr TxItr) (crypto.AddressCoin, bool, *CommunitySign) {
 	}
 	signtmp := cs.Sign
 	cs.Sign = nil
-	txItr.SetPayload(cs.Json())
+	txItr.SetPayload(cs.Protobuf())
 
 	signs := make([][]byte, 0)
 	//所有签名字段设置为空
@@ -105,7 +136,7 @@ func CheckPayload(txItr TxItr) (crypto.AddressCoin, bool, *CommunitySign) {
 	signDst := txItr.Serialize()
 	cs.Sign = signtmp
 	//传进来的参数被改变了值，现在改回去
-	txItr.SetPayload(cs.Json())
+	txItr.SetPayload(cs.Protobuf())
 	for i, _ := range signs {
 		txItr.SetSign(uint64(i), signs[i])
 	}

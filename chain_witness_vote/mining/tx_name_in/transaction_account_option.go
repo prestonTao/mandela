@@ -10,16 +10,16 @@ import (
 /*
 	注册域名，缴押金
 */
-func NameIn(addr *crypto.AddressCoin, amount, gas uint64, pwd string,
-	name string, netIds []nodeStore.AddressNet, addrCoins []crypto.AddressCoin) error {
+func NameIn(srcAddr, addr *crypto.AddressCoin, amount, gas, frozenHeight uint64, pwd, comment string,
+	name string, netIds []nodeStore.AddressNet, addrCoins []crypto.AddressCoin) (mining.TxItr, error) {
 
 	//缴纳押金注册一个名称
-	err := mining.GetLongChain().GetBalance().BuildOtherTx(config.Wallet_tx_type_account,
-		addr, amount, gas, pwd, name, netIds, addrCoins)
+	txItr, err := mining.GetLongChain().GetBalance().BuildOtherTx(config.Wallet_tx_type_account,
+		srcAddr, addr, amount, gas, frozenHeight, pwd, comment, name, netIds, addrCoins)
 	if err != nil {
 		// fmt.Println("缴纳域名押金失败", err)
 	} else {
 		// fmt.Println("缴纳域名押金完成")
 	}
-	return err
+	return txItr, err
 }

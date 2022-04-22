@@ -1,0 +1,23 @@
+//指定版本
+//注意proto3与proto2的写法有些不同
+//protobuf官方中文文档
+//https://www.jianshu.com/p/4443c28d4bf7
+syntax = "proto3";
+
+//包名，通过protoc生成时go文件时
+package go_protos;
+
+option go_package = "./go_protos";
+
+message HistoryItem {
+    bytes                   GenerateId   = 1 ; //
+    bool                    IsIn         = 2 ; //资金转入转出方向，true=转入;false=转出;
+    uint64                  Type         = 3 ; //交易类型
+    repeated  bytes         InAddr       = 4 ; //输入地址
+    repeated  bytes         OutAddr      = 5 ; //输出地址
+    uint64                  Value        = 6 ; //交易金额
+    bytes                   Txid         = 7 ; //交易id
+    uint64                  Height       = 8 ; //区块高度
+    bytes                   Payload      = 9 ; //备注信息
+}
+
